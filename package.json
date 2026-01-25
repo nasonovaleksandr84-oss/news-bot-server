@@ -1,0 +1,15 @@
+{
+  "name": "battery-news-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@google/genai": "^1.38.0",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^2.7.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
