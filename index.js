@@ -21,87 +21,119 @@ const addLog = (msg) => {
   console.log(log);
 };
 
-async function sendToTelegram(text) {
+async function sendToTelegram(text, image = null) {
   const token = process.env.TELEGRAM_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   
   if (!token || !chatId) {
-    addLog("⚠️ Пропуск TG: не настроены TELEGRAM_TOKEN или TELEGRAM_CHAT_ID в Render");
+    addLog("⚠️ Ошибка: TELEGRAM_TOKEN или TELEGRAM_CHAT_ID не заданы в настройках Render");
     return false;
   }
 
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const method = image ? 'sendPhoto' : 'sendMessage';
+  const url = `https://api.telegram.org/bot${token}/${method}`;
+  
+  const body = image 
+    ? { chat_id: chatId, photo: image, caption: text, parse_mode: 'HTML' }
+    : { chat_id: chatId, text: text, parse_mode: 'HTML' };
+
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: text,
-        parse_mode: 'HTML'
-      })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
     if (res.ok) {
-      addLog("📢 Пост успешно отправлен в Telegram!");
+      addLog("📢 Успешно отправлено в Telegram!");
       return true;
     } else {
-      addLog(`❌ Ошибка TG API: ${data.description}`);
+      addLog(`❌ Ошибка Telegram API: ${data.description}`);
       return false;
     }
   } catch (e) {
-    addLog(`❌ Ошибка сетевого запроса к TG: ${e.message}`);
+    addLog(`❌ Ошибка сети при отправке в TG: ${e.message}`);
     return false;
   }
 }
 
 async function runDiscovery() {
-  addLog("🔍 Начинаю поиск свежих новостей про аккумуляторы...");
+  addLog("🔍 Запускаю ИИ-поиск новостей (Gemini 3 Pro + Search)...");
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: "Найди 3 самые важные новости про твердотельные и литиевые аккумуляторы за последние 24 часа. Составь отчет на русском языке. Для каждой новости напиши заголовок и краткий абзац. В конце добавь подходящие хештеги.",
+      contents: "Найди 3 самые важные технические новости про твердотельные аккумуляторы и электромобили за последние 24 часа. Сформируй список объектов JSON. Каждый объект должен иметь: id, title, summary, telegramPost, visualPrompt, impactScore (1-100), keywords (массив). Отвечай ТОЛЬКО чистым JSON.",
       config: { 
         tools: [{ googleSearch: {} }] 
       }
     });
 
-    const newsText = response.text;
-    if (!newsText) throw new Error("AI вернул пустой ответ");
+    const text = response.text;
+    // Очистка от markdown-оберток если они есть
+    const jsonStr = text.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim();
+    const newArticles = JSON.parse(jsonStr);
     
-    addLog("✅ Нейросеть успешно обработала данные");
-    
-    // Отправляем результат в Telegram
-    await sendToTelegram(newsText);
+    // Добавляем дату создания
+    const processed = newArticles.map(a => ({
+      ...a,
+      createdAt: new Date().toISOString(),
+      status: 'draft'
+    }));
+
+    articles = [...processed, ...articles].slice(0, 20);
+    addLog(`✅ Найдено и обработано новостей: ${processed.length}`);
     
   } catch (err) {
-    addLog(`❌ Критическая ошибка в цикле: ${err.message}`);
+    addLog(`❌ Ошибка в runDiscovery: ${err.message}`);
+    // Если упал парсинг JSON, выведем сырой текст для отладки
+    console.error(err);
   }
 }
 
-// Эндпоинты
+// --- API ЭНДПОИНТЫ ---
+
 app.get('/api/status', (req, res) => {
   res.json({ 
     isOnline: true, 
-    version: "1.1.5", 
+    version: "1.2.0", 
     mode: 'production',
-    logs: logs 
+    logs: logs.slice(0, 10)
   });
 });
 
-app.post('/api/trigger', (req, res) => {
-  addLog("🕹️ Ручной запуск через админку...");
-  runDiscovery();
-  res.json({ status: "started" });
+app.get('/api/articles', (req, res) => {
+  res.json(articles);
 });
 
-// Крон: каждый час
-cron.schedule('0 * * * *', () => {
-  addLog("⏰ Запуск по расписанию...");
+app.post('/api/trigger', (req, res) => {
+  addLog("🕹️ Ручной запуск поиска из админки...");
   runDiscovery();
+  res.json({ status: "processing" });
 });
+
+app.post('/api/publish', async (req, res) => {
+  const { articleId, image } = req.body;
+  const article = articles.find(a => a.id === articleId);
+  
+  if (!article) {
+    return res.status(404).json({ error: "Новость не найдена" });
+  }
+
+  addLog(`📤 Публикация новости: ${article.title}`);
+  const success = await sendToTelegram(article.telegramPost, image);
+  
+  if (success) {
+    article.status = 'published';
+    res.json({ success: true });
+  } else {
+    res.status(500).json({ error: "Ошибка отправки в Telegram" });
+  }
+});
+
+// Крон: раз в час
+cron.schedule('0 * * * *', runDiscovery);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  addLog(`🚀 Сервер запущен на порту ${PORT}. Версия 1.1.5`);
+  addLog(`🚀 Сервер v1.2.0 готов к работе на порту ${PORT}`);
 });
