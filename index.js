@@ -20,138 +20,117 @@ const addLog = (msg) => {
   console.log(log);
 };
 
-// Конвертер из Markdown в HTML для Telegram
 function formatToTelegramHTML(text) {
   if (!text) return "";
   return text
-    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // Жирный
-    .replace(/\*(.*?)\*/g, '<i>$1</i>')      // Курсив
-    .replace(/__(.*?)__/g, '<i>$1</i>');       // Курсив (нижнее подчеркивание)
+    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.*?)\*/g, '<i>$1</i>')
+    .replace(/__(.*?)__/g, '<i>$1</i>')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // Возвращаем теги обратно после очистки спецсимволов
+    .replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>')
+    .replace(/&lt;i&gt;/g, '<i>').replace(/&lt;\/i&gt;/g, '</i>')
+    .replace(/&lt;a (.*?)&gt;/g, '<a $1>').replace(/&lt;\/a&gt;/g, '</a>');
 }
 
-// Генерация изображения на сервере
-async function generateVisualForArticle(visualPrompt) {
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: { parts: [{ text: `Professional technical 3D visualization, 8k, cinematic lighting: ${visualPrompt}` }] },
-      config: { imageConfig: { aspectRatio: "16:9" } }
-    });
-
-    for (const part of response.candidates[0].content.parts) {
-      if (part.inlineData) {
-        return part.inlineData.data; // Base64
-      }
-    }
-  } catch (e) {
-    addLog(`⚠️ Ошибка генерации фото: ${e.message}`);
-    return null;
-  }
-}
-
-async function sendToTelegram(article, imageBase64) {
-  const token = process.env.TELEGRAM_TOKEN;
-  let chatId = process.env.TELEGRAM_CHAT_ID;
+// Загрузка фото в Telegram через Multipart (решает проблему отсутствия картинок)
+async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
+  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+  const buffer = Buffer.from(base64Image, 'base64');
   
-  if (!token || !chatId) return false;
+  const payload = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="image.png"\r\nContent-Type: image/png\r\n\r\n`),
+    buffer,
+    Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="parse_mode"\r\n\r\nHTML\r\n`),
+    Buffer.from(`--${boundary}--\r\n`)
+  ]);
 
-  if (!chatId.startsWith('-') && !chatId.startsWith('@')) {
-    chatId = `-100${chatId}`;
-  }
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+    body: payload
+  });
 
-  // Форматируем текст (убираем звезды, ставим HTML теги)
-  const formattedText = formatToTelegramHTML(article.telegramPost);
-  const caption = `<b>${article.title}</b>\n\n${formattedText}\n\n🔗 <a href="${article.sources[0]?.url}">Читать оригинал</a>`;
-
-  try {
-    let endpoint = 'sendMessage';
-    let body = { chat_id: chatId, text: caption, parse_mode: 'HTML' };
-
-    if (imageBase64) {
-      endpoint = 'sendPhoto';
-      // Отправка файла через multipart/form-data была бы сложнее, 
-      // но Bot API поддерживает прямую отправку base64 через URL (иногда) или просто передачу Buffer.
-      // Используем метод передачи Buffer для надежности
-      const formData = new URLSearchParams();
-      formData.append('chat_id', chatId);
-      formData.append('photo', `data:image/png;base64,${imageBase64}`); // Для небольших фото
-      formData.append('caption', caption);
-      formData.append('parse_mode', 'HTML');
-      
-      // Однако проще всего отправить как JSON, если мы используем URL картинки или отправить Buffer
-      // Используем упрощенный метод через URL, если картинка не проходит - шлем текст.
-    }
-
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        photo: `data:image/png;base64,${imageBase64}`,
-        caption: caption,
-        parse_mode: 'HTML'
-      })
-    });
-
-    // Если фото не прошло (бывает из-за размера base64), шлем текст
-    if (!r.ok) {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: caption, parse_mode: 'HTML' })
-        });
-    }
-
-    article.status = 'published';
-    addLog(`✅ Опубликовано в TG: ${article.title.substring(0,25)}...`);
-    return true;
-  } catch (e) {
-    addLog(`❌ Сбой TG: ${e.message}`);
-    return false;
-  }
+  return await response.json();
 }
 
 async function runDiscovery() {
-  addLog("🔋 ГЛУБОКИЙ ПОИСК (v1.4.4 - Media Mode)...");
+  addLog("🏢 ЗАПУСК РЕДАКЦИИ (v1.4.5 - Deduplication & Photo Fix)...");
   
+  // Берем последние 10 тем для исключения повторов
+  const recentTopics = articles.slice(0, 10).map(a => a.title).join(', ');
+
+  const systemPrompt = `Ты - главный редактор техно-блога. Твоя задача:
+1. Просканируй новости за последний час про аккумуляторы и энергетику.
+2. ЕСЛИ несколько источников пишут об одном и том же, ОБЪЕДИНИ их в один пост.
+3. НЕ ПИШИ о темах, которые уже были: [${recentTopics}].
+4. Для каждой темы выбери ОДНУ самую надежную и прямую ссылку из поиска.
+5. Пиши экспертно на русском. Используй <b> и <i>. Никаких звёздочек **.
+Верни JSON массив объектов: [{title, summary, telegramPost, visualPrompt, sourceUrl}]`;
+
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: "Найди 3 актуальные новости про аккумуляторы и энергетику. Для каждой напиши подробный пост для Telegram. ИСПОЛЬЗУЙ ТОЛЬКО <b> И <i> ТЕГИ ДЛЯ ВЫДЕЛЕНИЯ ТЕКСТА. ЗАПРЕЩЕНО ИСПОЛЬЗОВАТЬ **. Ссылки бери ПРЯМЫЕ из поиска. Верни JSON: [{title, telegramPost, visualPrompt, sources:[{url}]}]",
+      contents: systemPrompt,
       config: { tools: [{ googleSearch: {} }] }
     });
 
-    const start = result.text.indexOf('[');
-    const end = result.text.lastIndexOf(']');
-    const items = JSON.parse(result.text.substring(start, end + 1));
+    const cleanText = result.text.substring(result.text.indexOf('['), result.text.lastIndexOf(']') + 1);
+    const newItems = JSON.parse(cleanText);
 
-    for (const item of items) {
-      item.id = `art_${Date.now()}_${Math.random().toString(36).substr(2,4)}`;
-      item.createdAt = new Date().toISOString();
+    if (newItems.length === 0) {
+      addLog("📭 Новых уникальных тем не обнаружено.");
+      return;
+    }
+
+    for (const item of newItems) {
+      addLog(`🎨 Создаю визуал: ${item.title.substring(0,30)}...`);
       
-      addLog(`🎨 Генерирую обложку: ${item.title.substring(0,30)}...`);
-      const imageBase64 = await generateVisualForArticle(item.visualPrompt);
-      
-      await sendToTelegram(item, imageBase64);
+      const imgResp = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: { parts: [{ text: `High-tech photorealistic 8k render: ${item.visualPrompt}` }] },
+        config: { imageConfig: { aspectRatio: "16:9" } }
+      });
+
+      let base64 = null;
+      for (const p of imgResp.candidates[0].content.parts) if (p.inlineData) base64 = p.inlineData.data;
+
+      const chatId = process.env.TELEGRAM_CHAT_ID;
+      const token = process.env.TELEGRAM_TOKEN;
+
+      const caption = `<b>${item.title}</b>\n\n${formatToTelegramHTML(item.telegramPost)}\n\n🔗 <a href="${item.sourceUrl}">Читать источник</a>`;
+
+      if (token && chatId) {
+        const tgRes = await sendPhotoToTelegram(chatId, token, caption, base64);
+        if (tgRes.ok) {
+           addLog(`✅ Опубликовано: ${item.title.substring(0,20)}...`);
+        } else {
+           addLog(`⚠️ Ошибка TG: ${tgRes.description}. Пробую только текст...`);
+           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ chat_id: chatId, text: caption, parse_mode: 'HTML' })
+           });
+        }
+      }
+
+      item.id = Date.now() + Math.random();
+      item.status = 'published';
       articles.unshift(item);
     }
-    
     articles = articles.slice(0, 50);
   } catch (err) {
-    addLog(`❌ Критическая ошибка: ${err.message}`);
+    addLog(`❌ Ошибка редакции: ${err.message}`);
   }
 }
 
-app.get('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "started" }); });
-app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.4.4", logs: logs }));
+app.get('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "working" }); });
+app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.4.5", logs: logs }));
 app.get('/api/articles', (req, res) => res.json(articles));
-app.post('/api/publish', async (req, res) => {
-    const { articleId, image } = req.body;
-    const article = articles.find(a => a.id === articleId);
-    if (!article) return res.status(404).send("Not found");
-    const success = await sendToTelegram(article, image);
-    res.json({ success });
-});
 
 cron.schedule('0 * * * *', runDiscovery);
-app.listen(process.env.PORT || 10000, () => addLog("🔥 Engine v1.4.4 Active"));
+app.listen(process.env.PORT || 10000, () => addLog("🚀 Editor Engine v1.4.5 Ready"));
