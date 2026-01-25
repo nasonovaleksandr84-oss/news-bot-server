@@ -30,13 +30,28 @@ function extractJson(text) {
 }
 
 async function runDiscovery() {
-  addLog("🚀 Запуск Gemini 3 PRO Discovery...");
-  try {
-    const result = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+  addLog("🚀 Попытка запуска Gemini 3 PRO...");
+  
+  const performRequest = async (model) => {
+    return await ai.models.generateContent({
+      model: model,
       contents: "Найди 3 свежие и важные новости про технологии аккумуляторов. Составь экспертный обзор. Верни JSON массив объектов: [{id, title, summary, telegramPost, visualPrompt, impactScore, techSpecs: {energyDensity, chemistry}}]. Только JSON.",
       config: { tools: [{ googleSearch: {} }] }
     });
+  };
+
+  try {
+    let result;
+    try {
+      result = await performRequest('gemini-3-pro-preview');
+    } catch (proErr) {
+      if (proErr.message.includes('429')) {
+        addLog("⚠️ Лимит Pro исчерпан (биллинг еще не обновился). Пробую Flash...");
+        result = await performRequest('gemini-3-flash-preview');
+      } else {
+        throw proErr;
+      }
+    }
     
     const responseText = result.text || "";
     const jsonStr = extractJson(responseText);
@@ -55,14 +70,14 @@ async function runDiscovery() {
     }));
 
     articles = [...newArticles, ...articles].slice(0, 50);
-    addLog(`✅ УСПЕХ: Gemini 3 PRO проанализировала и добавила ${newArticles.length} постов.`);
+    addLog(`✅ УСПЕХ: Найдено и добавлено ${newArticles.length} постов.`);
 
   } catch (err) {
     addLog(`❌ ОШИБКА ДВИЖКА: ${err.message}`);
   }
 }
 
-app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.3.0-pro", logs: logs }));
+app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.3.1-hybrid", logs: logs }));
 app.get('/api/articles', (req, res) => res.json(articles));
 app.post('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "processing" }); });
 
@@ -97,4 +112,4 @@ app.post('/api/publish', async (req, res) => {
 
 cron.schedule('0 * * * *', runDiscovery);
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => addLog(`🔥 Движок v1.3.0 PRO запущен на порту ${PORT}`));
+app.listen(PORT, () => addLog(`🔥 Гибридный движок v1.3.1 запущен на порту ${PORT}`));
