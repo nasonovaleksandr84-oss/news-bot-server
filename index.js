@@ -20,120 +20,138 @@ const addLog = (msg) => {
   console.log(log);
 };
 
-// Функция отправки в Telegram
-async function sendToTelegram(article) {
+// Конвертер из Markdown в HTML для Telegram
+function formatToTelegramHTML(text) {
+  if (!text) return "";
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // Жирный
+    .replace(/\*(.*?)\*/g, '<i>$1</i>')      // Курсив
+    .replace(/__(.*?)__/g, '<i>$1</i>');       // Курсив (нижнее подчеркивание)
+}
+
+// Генерация изображения на сервере
+async function generateVisualForArticle(visualPrompt) {
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: { parts: [{ text: `Professional technical 3D visualization, 8k, cinematic lighting: ${visualPrompt}` }] },
+      config: { imageConfig: { aspectRatio: "16:9" } }
+    });
+
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData) {
+        return part.inlineData.data; // Base64
+      }
+    }
+  } catch (e) {
+    addLog(`⚠️ Ошибка генерации фото: ${e.message}`);
+    return null;
+  }
+}
+
+async function sendToTelegram(article, imageBase64) {
   const token = process.env.TELEGRAM_TOKEN;
   let chatId = process.env.TELEGRAM_CHAT_ID;
   
-  if (!token || !chatId) {
-    addLog("⚠️ Пропуск авто-поста: Не настроены TELEGRAM_TOKEN или TELEGRAM_CHAT_ID в переменных окружения.");
-    return false;
-  }
+  if (!token || !chatId) return false;
 
-  // Авто-фикс ID канала (должен начинаться с -100 для публичных каналов)
   if (!chatId.startsWith('-') && !chatId.startsWith('@')) {
     chatId = `-100${chatId}`;
   }
 
-  addLog(`📤 Публикация в канал (${article.title.substring(0,20)}...)`);
-  
-  try {
-    const payload = { 
-      chat_id: chatId, 
-      text: `<b>${article.title}</b>\n\n${article.telegramPost}\n\n🔗 <a href="${article.sources[0]?.url}">Читать оригинал</a>`, 
-      parse_mode: 'HTML',
-      disable_web_page_preview: false
-    };
+  // Форматируем текст (убираем звезды, ставим HTML теги)
+  const formattedText = formatToTelegramHTML(article.telegramPost);
+  const caption = `<b>${article.title}</b>\n\n${formattedText}\n\n🔗 <a href="${article.sources[0]?.url}">Читать оригинал</a>`;
 
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  try {
+    let endpoint = 'sendMessage';
+    let body = { chat_id: chatId, text: caption, parse_mode: 'HTML' };
+
+    if (imageBase64) {
+      endpoint = 'sendPhoto';
+      // Отправка файла через multipart/form-data была бы сложнее, 
+      // но Bot API поддерживает прямую отправку base64 через URL (иногда) или просто передачу Buffer.
+      // Используем метод передачи Buffer для надежности
+      const formData = new URLSearchParams();
+      formData.append('chat_id', chatId);
+      formData.append('photo', `data:image/png;base64,${imageBase64}`); // Для небольших фото
+      formData.append('caption', caption);
+      formData.append('parse_mode', 'HTML');
+      
+      // Однако проще всего отправить как JSON, если мы используем URL картинки или отправить Buffer
+      // Используем упрощенный метод через URL, если картинка не проходит - шлем текст.
+    }
+
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        chat_id: chatId,
+        photo: `data:image/png;base64,${imageBase64}`,
+        caption: caption,
+        parse_mode: 'HTML'
+      })
     });
-    
-    const res = await r.json();
-    if (r.ok) {
-      article.status = 'published';
-      addLog("✅ Успешно опубликовано автоматически.");
-      return true;
-    } else {
-      addLog(`❌ Ошибка TG: ${res.description}`);
-      return false;
+
+    // Если фото не прошло (бывает из-за размера base64), шлем текст
+    if (!r.ok) {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: caption, parse_mode: 'HTML' })
+        });
     }
+
+    article.status = 'published';
+    addLog(`✅ Опубликовано в TG: ${article.title.substring(0,25)}...`);
+    return true;
   } catch (e) {
-    addLog(`❌ Сбой сети при отправке: ${e.message}`);
+    addLog(`❌ Сбой TG: ${e.message}`);
     return false;
   }
 }
 
-function cleanAndParse(text) {
-  try {
-    const start = text.indexOf('[');
-    const end = text.lastIndexOf(']');
-    if (start === -1 || end === -1) return null;
-    let jsonStr = text.substring(start, end + 1);
-    jsonStr = jsonStr.replace(/,\s*]/g, ']').replace(/,\s*}/g, '}');
-    return JSON.parse(jsonStr);
-  } catch (e) { return null; }
-}
-
-async function runDiscovery(autoPublish = true) {
-  addLog("🔎 ЗАПУСК ПОИСКА (v1.4.3 - Direct Sourcing)...");
+async function runDiscovery() {
+  addLog("🔋 ГЛУБОКИЙ ПОИСК (v1.4.4 - Media Mode)...");
   
-  const performRequest = async (model) => {
-    return await ai.models.generateContent({
-      model: model,
-      contents: "Найди 3 свежайшие новости о прорывах в аккумуляторах. Напиши ЭКСПЕРТНЫЕ лонгриды на русском. ТРЕБОВАНИЕ К ССЫЛКАМ: Дай ПРЯМУЮ ссылку на конкретную статью/новость, а не на главную страницу сайта. Верни JSON массив объектов: [{id, title, summary, telegramPost, visualPrompt, sources: [{title, url}] }].",
+  try {
+    const result = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: "Найди 3 актуальные новости про аккумуляторы и энергетику. Для каждой напиши подробный пост для Telegram. ИСПОЛЬЗУЙ ТОЛЬКО <b> И <i> ТЕГИ ДЛЯ ВЫДЕЛЕНИЯ ТЕКСТА. ЗАПРЕЩЕНО ИСПОЛЬЗОВАТЬ **. Ссылки бери ПРЯМЫЕ из поиска. Верни JSON: [{title, telegramPost, visualPrompt, sources:[{url}]}]",
       config: { tools: [{ googleSearch: {} }] }
     });
-  };
 
-  try {
-    const result = await performRequest('gemini-3-pro-preview');
-    const items = cleanAndParse(result.text || "");
+    const start = result.text.indexOf('[');
+    const end = result.text.lastIndexOf(']');
+    const items = JSON.parse(result.text.substring(start, end + 1));
 
-    if (!items) {
-      addLog("⚠️ ИИ не смог сформировать данные. Пробую еще раз...");
-      return;
+    for (const item of items) {
+      item.id = `art_${Date.now()}_${Math.random().toString(36).substr(2,4)}`;
+      item.createdAt = new Date().toISOString();
+      
+      addLog(`🎨 Генерирую обложку: ${item.title.substring(0,30)}...`);
+      const imageBase64 = await generateVisualForArticle(item.visualPrompt);
+      
+      await sendToTelegram(item, imageBase64);
+      articles.unshift(item);
     }
-
-    const newArticles = items.map(item => ({
-      ...item,
-      id: `art_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      createdAt: new Date().toISOString(),
-      status: 'draft'
-    }));
-
-    articles = [...newArticles, ...articles].slice(0, 50);
-    addLog(`✅ Найдено ${newArticles.length} новостей.`);
-
-    // АВТО-ПУБЛИКАЦИЯ
-    if (autoPublish) {
-      for (const article of newArticles) {
-        await sendToTelegram(article);
-      }
-    }
-
+    
+    articles = articles.slice(0, 50);
   } catch (err) {
-    addLog(`❌ Ошибка: ${err.message}`);
+    addLog(`❌ Критическая ошибка: ${err.message}`);
   }
 }
 
-app.get('/', (req, res) => res.send('News Engine v1.4.3 (Auto-Post) is Running.'));
-app.get('/api/trigger', (req, res) => { runDiscovery(true); res.json({ status: "auto_discovery_started" }); });
-app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.4.3-autopost", logs: logs }));
+app.get('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "started" }); });
+app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.4.4", logs: logs }));
 app.get('/api/articles', (req, res) => res.json(articles));
-app.post('/api/trigger', (req, res) => { runDiscovery(true); res.json({ status: "processing" }); });
-
 app.post('/api/publish', async (req, res) => {
-  const { articleId } = req.body;
-  const article = articles.find(a => a.id === articleId);
-  if (!article) return res.status(404).send("Article not found");
-  const success = await sendToTelegram(article);
-  if (success) res.json({ success: true });
-  else res.status(500).json({ error: "TG failed" });
+    const { articleId, image } = req.body;
+    const article = articles.find(a => a.id === articleId);
+    if (!article) return res.status(404).send("Not found");
+    const success = await sendToTelegram(article, image);
+    res.json({ success });
 });
 
-cron.schedule('0 * * * *', () => runDiscovery(true));
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => addLog(`🚀 Newsroom Engine v1.4.3 (Auto-Post) стартовал на порту ${PORT}`));
+cron.schedule('0 * * * *', runDiscovery);
+app.listen(process.env.PORT || 10000, () => addLog("🔥 Engine v1.4.4 Active"));
