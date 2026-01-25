@@ -30,12 +30,12 @@ function extractJson(text) {
 }
 
 async function runDiscovery() {
-  addLog("🚀 Попытка запуска Gemini 3 PRO...");
+  addLog("🚀 Попытка запуска Gemini 3 PRO Discovery...");
   
   const performRequest = async (model) => {
     return await ai.models.generateContent({
       model: model,
-      contents: "Найди 3 свежие и важные новости про технологии аккумуляторов. Составь экспертный обзор. Верни JSON массив объектов: [{id, title, summary, telegramPost, visualPrompt, impactScore, techSpecs: {energyDensity, chemistry}}]. Только JSON.",
+      contents: "Найди 3 свежие и важные новости про технологии аккумуляторов. Составь экспертный обзор на русском языке. Верни ТОЛЬКО JSON массив объектов. КАЖДЫЙ ОБЪЕКТ ДОЛЖЕН СОДЕРЖАТЬ: {id, title, summary, telegramPost, visualPrompt, impactScore, techSpecs: {energyDensity, chemistry}, sources: [{title, url}]}. ОБЯЗАТЕЛЬНО заполни массив sources ссылками на найденные статьи.",
       config: { tools: [{ googleSearch: {} }] }
     });
   };
@@ -46,7 +46,7 @@ async function runDiscovery() {
       result = await performRequest('gemini-3-pro-preview');
     } catch (proErr) {
       if (proErr.message.includes('429')) {
-        addLog("⚠️ Лимит Pro исчерпан (биллинг еще не обновился). Пробую Flash...");
+        addLog("⚠️ Лимит Pro исчерпан (биллинг еще не обновился). Использую Flash...");
         result = await performRequest('gemini-3-flash-preview');
       } else {
         throw proErr;
@@ -57,34 +57,35 @@ async function runDiscovery() {
     const jsonStr = extractJson(responseText);
 
     if (!jsonStr) {
-        addLog("❌ ОШИБКА: Движок не смог сформировать JSON.");
+        addLog("❌ ОШИБКА: Движок не смог сформировать валидный JSON.");
         return;
     }
 
     const rawItems = JSON.parse(jsonStr);
     const newArticles = rawItems.map(item => ({
       ...item,
-      id: item.id || `art_${Date.now()}`,
+      id: item.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      sources: Array.isArray(item.sources) ? item.sources : [],
       createdAt: new Date().toISOString(),
       status: 'draft'
     }));
 
     articles = [...newArticles, ...articles].slice(0, 50);
-    addLog(`✅ УСПЕХ: Найдено и добавлено ${newArticles.length} постов.`);
+    addLog(`✅ УСПЕХ: Синхронизировано ${newArticles.length} новых постов.`);
 
   } catch (err) {
     addLog(`❌ ОШИБКА ДВИЖКА: ${err.message}`);
   }
 }
 
-app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.3.1-hybrid", logs: logs }));
+app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.3.2-stable", logs: logs }));
 app.get('/api/articles', (req, res) => res.json(articles));
 app.post('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "processing" }); });
 
 app.post('/api/publish', async (req, res) => {
   const { articleId, image } = req.body;
   const article = articles.find(a => a.id === articleId);
-  if (!article) return res.status(404).json({ error: "Not found" });
+  if (!article) return res.status(404).json({ error: "Article not found" });
   
   try {
     const method = image ? 'sendPhoto' : 'sendMessage';
@@ -107,9 +108,12 @@ app.post('/api/publish', async (req, res) => {
         addLog(`❌ Ошибка Telegram API: ${data.description}`);
         res.status(500).json(data);
     }
-  } catch (e) { res.status(500).send(e.message); }
+  } catch (e) { 
+    addLog(`❌ Ошибка публикации: ${e.message}`);
+    res.status(500).send(e.message); 
+  }
 });
 
 cron.schedule('0 * * * *', runDiscovery);
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => addLog(`🔥 Гибридный движок v1.3.1 запущен на порту ${PORT}`));
+app.listen(PORT, () => addLog(`🔥 Стабильный движок v1.3.2 запущен на порту ${PORT}`));
