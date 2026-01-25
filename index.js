@@ -20,96 +20,87 @@ const addLog = (msg) => {
   console.log(log);
 };
 
-async function runDiscovery() {
-  addLog("🔍 Поиск активирован...");
+function extractJson(text) {
   try {
-    addLog("📡 Соединение с Gemini 3 Pro + Search Grounding...");
-    
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: "Найди 3 свежих новости про аккумуляторы и твердотельные батареи. Верни СТРОГО JSON массив объектов: [{id, title, summary, telegramPost, visualPrompt, impactScore, techSpecs: {energyDensity, chemistry}}]. Только JSON без лишних слов.",
-      config: { 
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json"
-      }
+    const start = text.indexOf('[');
+    const end = text.lastIndexOf(']');
+    if (start !== -1 && end !== -1) return text.substring(start, end + 1);
+    return null;
+  } catch (e) { return null; }
+}
+
+async function runDiscovery() {
+  addLog("🚀 Поиск запущен (Model: Flash)...");
+  try {
+    // Используем gemini-3-flash-preview, так как у нее выше квоты
+    const result = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: "Найди 3 свежих новости про аккумуляторы и твердотельные батареи. Верни СТРОГО JSON массив: [{id, title, summary, telegramPost, visualPrompt, impactScore, techSpecs: {energyDensity, chemistry}}]. Только JSON, без текста.",
+      config: { tools: [{ googleSearch: {} }] }
     });
     
-    if (!response.text) {
-      throw new Error("Пустой ответ от ИИ");
+    const responseText = result.text || "";
+    const jsonStr = extractJson(responseText);
+
+    if (!jsonStr) {
+      addLog("❌ ОШИБКА: ИИ не прислал данные.");
+      return;
     }
 
-    addLog("⏳ Анализ ответа...");
-    // Очистка от markdown оберток, если они есть
-    let jsonStr = response.text.trim();
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/^```(json)?/, '').replace(/```$/, '').trim();
-    }
-
-    const newArticles = JSON.parse(jsonStr).map(a => ({
-      ...a, 
-      id: a.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      createdAt: new Date().toISOString(), 
+    const rawItems = JSON.parse(jsonStr);
+    const newArticles = rawItems.map(item => ({
+      ...item,
+      id: item.id || `art_${Date.now()}`,
+      createdAt: new Date().toISOString(),
       status: 'draft'
     }));
-    
-    articles = [...newArticles, ...articles].slice(0, 50);
-    addLog(`✅ Успех: Найдено и обработано ${newArticles.length} новостей.`);
-  } catch (err) { 
-    addLog(`❌ ОШИБКА: ${err.message}`);
-    console.error(err);
+
+    articles = [...newArticles, ...articles].slice(0, 40);
+    addLog(`✅ УСПЕХ: Найдено ${newArticles.length} новостей.`);
+
+  } catch (err) {
+    if (err.message.includes('429') || err.message.includes('quota')) {
+      addLog("⚠️ ЛИМИТЫ ИСЧЕРПАНЫ (429): Бесплатный ключ требует паузы в 60 сек.");
+      addLog("💡 Совет: Привяжите биллинг на ai.google.dev для Pro-лимитов.");
+    } else {
+      addLog(`❌ ОШИБКА: ${err.message}`);
+    }
   }
 }
 
-app.get('/api/status', (req, res) => res.json({ 
-  isOnline: true, 
-  version: "1.2.3", 
-  logs: logs, 
-  mode: 'production' 
-}));
-
+app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.2.6", logs: logs }));
 app.get('/api/articles', (req, res) => res.json(articles));
-
-app.post('/api/trigger', (req, res) => { 
-  addLog("🕹️ Ручной запуск через панель управления..."); 
-  runDiscovery(); 
-  res.json({ status: "started" }); 
-});
+app.post('/api/trigger', (req, res) => { addLog("🕹️ Старт..."); runDiscovery(); res.json({ status: "started" }); });
 
 app.post('/api/publish', async (req, res) => {
   const { articleId, image } = req.body;
   const article = articles.find(a => a.id === articleId);
-  if (!article) return res.status(404).json({ error: "Article not found" });
-  
-  addLog(`📢 Публикация: ${article.title}`);
-  const token = process.env.TELEGRAM_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!article) return res.status(404).json({ error: "Not found" });
   
   try {
-    const endpoint = image ? 'sendPhoto' : 'sendMessage';
-    const body = image 
-      ? { chat_id: chatId, photo: image, caption: article.telegramPost, parse_mode: 'HTML' }
-      : { chat_id: chatId, text: article.telegramPost, parse_mode: 'HTML' };
+    const method = image ? 'sendPhoto' : 'sendMessage';
+    const payload = image 
+      ? { chat_id: process.env.TELEGRAM_CHAT_ID, photo: image, caption: article.telegramPost, parse_mode: 'HTML' }
+      : { chat_id: process.env.TELEGRAM_CHAT_ID, text: article.telegramPost, parse_mode: 'HTML' };
 
-    const r = await fetch(`https://api.telegram.org/bot${token}/${endpoint}`, { 
-      method: 'POST', 
-      headers: {'Content-Type': 'application/json'}, 
-      body: JSON.stringify(body) 
+    const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
     
     if (r.ok) {
-      article.status = 'published';
-      addLog("✅ Телеграм подтвердил получение.");
-      return res.json({ success: true });
+        article.status = 'published';
+        addLog("✅ Опубликовано в TG!");
+        res.json({ success: true });
+    } else {
+        const data = await r.json();
+        addLog(`❌ ТГ: ${data.description}`);
+        res.status(500).json(data);
     }
-    const error = await r.json();
-    addLog(`❌ Ошибка TG: ${error.description}`);
-    res.status(500).json(error);
-  } catch (e) { 
-    addLog("❌ Ошибка сети при связи с TG");
-    res.status(500).json({ error: "Network failed" }); 
-  }
+  } catch (e) { res.status(500).send(e.message); }
 });
 
 cron.schedule('0 * * * *', runDiscovery);
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => addLog(`🚀 Движок v1.2.3 запущен на порту ${PORT}`));
+app.listen(PORT, () => addLog(`🚀 Движок v1.2.6 активен (Flash Mode)`));
