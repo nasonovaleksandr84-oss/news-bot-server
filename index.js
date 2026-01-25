@@ -20,24 +20,36 @@ const addLog = (msg) => {
   console.log(log);
 };
 
-function extractJson(text) {
+// Более надежная очистка JSON
+function cleanAndParse(text) {
   try {
     const start = text.indexOf('[');
     const end = text.lastIndexOf(']');
-    if (start !== -1 && end !== -1) return text.substring(start, end + 1);
+    if (start === -1 || end === -1) return null;
+    let jsonStr = text.substring(start, end + 1);
+    
+    // Исправляем типичные ошибки ИИ (лишние запятые перед закрытием)
+    jsonStr = jsonStr.replace(/,\s*]/g, ']').replace(/,\s*}/g, '}');
+    
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error("Parse Error:", e);
     return null;
-  } catch (e) { return null; }
+  }
 }
 
 async function runDiscovery() {
-  addLog("🚀 Запуск DEEP RESEARCH (Gemini 3 PRO)...");
+  addLog("🧠 Глубокое сканирование (v1.4.2)...");
   
   const performRequest = async (model) => {
-    addLog(`🔍 Модель: ${model}. Изучаю последние патенты и новости...`);
+    addLog(`🔍 Анализ через ${model}...`);
     return await ai.models.generateContent({
       model: model,
-      contents: "Найди 3 максимально свежих и важных новости про аккумуляторы (твердотельные, натриевые и т.д.). Напиши ОЧЕНЬ ГЛУБОКИЕ, ПРОФЕССИОНАЛЬНЫЕ лонгриды на русском. Текст каждого поста должен быть в 2-3 раза длиннее обычного (минимум 4-5 абзацев). Обязательно включи: 1. Суть прорыва. 2. Технические детали (материалы, цифры). 3. Сравнение с текущими литий-ионными АКБ. 4. Мнение эксперта (имитация). Верни ТОЛЬКО JSON массив объектов: [{id, title, summary, telegramPost, visualPrompt, impactScore, techSpecs: {energyDensity, chemistry}, sources: [{title, url}]}].",
-      config: { tools: [{ googleSearch: {} }] }
+      contents: "Найди 3 свежие новости про аккумуляторы. Напиши 3 ЭКСПЕРТНЫХ ЛОНГРИДА. Каждый пост должен содержать: 1. ЗАГОЛОВОК. 2. ТЕХНИЧЕСКИЙ РАЗБОР (минимум 150 слов). 3. СРАВНЕНИЕ С АНАЛОГАМИ. 4. ПРОГНОЗ РЫНКА. Пиши очень подробно, используй термины. Верни ТОЛЬКО JSON массив объектов: [{id, title, summary, telegramPost, visualPrompt, impactScore, techSpecs: {energyDensity, chemistry}, sources: [{title, url}]}]. Убедись, что JSON полностью валиден и не обрывается.",
+      config: { 
+        tools: [{ googleSearch: {} }],
+        temperature: 0.7 
+      }
     });
   };
 
@@ -46,55 +58,43 @@ async function runDiscovery() {
     try {
       result = await performRequest('gemini-3-pro-preview');
     } catch (proErr) {
-      addLog("⚠️ Pro Mode недоступен или лимит. Пробую Flash...");
+      addLog("⚠️ Переключаюсь на Flash-модель...");
       result = await performRequest('gemini-3-flash-preview');
     }
     
-    addLog("✍️ ИИ пишет подробные статьи...");
     const responseText = result.text || "";
-    const jsonStr = extractJson(responseText);
+    const items = cleanAndParse(responseText);
 
-    if (!jsonStr) {
-        addLog("❌ ОШИБКА: ИИ не выдал JSON.");
+    if (!items || !Array.isArray(items)) {
+        addLog("❌ ОШИБКА: ИИ выдал битый текст. Попробуйте еще раз.");
         return;
     }
 
-    const rawItems = JSON.parse(jsonStr);
-    const newArticles = rawItems.map(item => ({
+    const newArticles = items.map(item => ({
       ...item,
-      id: item.id || `art_${Date.now()}`,
-      sources: Array.isArray(item.sources) ? item.sources : [],
+      id: item.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       createdAt: new Date().toISOString(),
       status: 'draft'
     }));
 
     articles = [...newArticles, ...articles].slice(0, 50);
-    addLog(`✅ ГОТОВО: Создано ${newArticles.length} масштабных обзоров.`);
+    addLog(`✅ УСПЕХ: Подготовлено ${newArticles.length} детальных материалов.`);
 
   } catch (err) {
-    addLog(`❌ КРИТИЧЕСКАЯ ОШИБКА: ${err.message}`);
+    addLog(`❌ ОШИБКА ДВИЖКА: ${err.message}`);
   }
 }
 
-// FIX: Обработка корня, чтобы Крон не получал 404
-app.get('/', (req, res) => {
-  res.send('Newsroom Engine v1.4.1 is Active. Server is Online.');
-});
-
-// FIX: Поддержка GET для Крона (чтобы можно было просто перейти по ссылке и запустить)
-app.get('/api/trigger', (req, res) => {
-  runDiscovery();
-  res.json({ status: "discovery_started_via_get" });
-});
-
-app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.4.1-stable", logs: logs }));
+app.get('/', (req, res) => res.send('News Engine v1.4.2 Ready.'));
+app.get('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "started" }); });
+app.get('/api/status', (req, res) => res.json({ isOnline: true, version: "1.4.2-pro", logs: logs }));
 app.get('/api/articles', (req, res) => res.json(articles));
 app.post('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "processing" }); });
 
 app.post('/api/publish', async (req, res) => {
   const { articleId, image } = req.body;
   const article = articles.find(a => a.id === articleId);
-  if (!article) return res.status(404).json({ error: "Not found" });
+  if (!article) return res.status(404).send("Article not found");
   
   try {
     const method = image ? 'sendPhoto' : 'sendMessage';
@@ -109,19 +109,17 @@ app.post('/api/publish', async (req, res) => {
     });
     
     if (r.ok) {
-        article.status = 'published';
-        addLog("✅ Опубликовано в Telegram.");
-        res.json({ success: true });
+      article.status = 'published';
+      addLog("✅ Успешно отправлено в канал.");
+      res.json({ success: true });
     } else {
-        const data = await r.json();
-        addLog(`❌ TG Error: ${data.description}`);
-        res.status(500).json(data);
+      const d = await r.json();
+      addLog(`❌ TG API: ${d.description}`);
+      res.status(500).json(d);
     }
-  } catch (e) { 
-    res.status(500).send(e.message); 
-  }
+  } catch (e) { res.status(500).send(e.message); }
 });
 
 cron.schedule('0 * * * *', runDiscovery);
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => addLog(`🔥 Стабильный движок v1.4.1 (Fix 404) запущен на порту ${PORT}`));
+app.listen(PORT, () => addLog(`🔥 Движок v1.4.2 (Fix JSON) активен на порту ${PORT}`));
