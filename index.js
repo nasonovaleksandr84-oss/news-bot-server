@@ -22,13 +22,15 @@ const addLog = (msg) => {
 
 function formatToTelegramHTML(text) {
   if (!text) return "";
+  // Исправленная очистка и форматирование
   return text
-    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-    .replace(/\*(.*?)\*/g, '<i>$1</i>')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>');
+    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.*?)\*/g, '<i>$1</i>')
+    .replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>')
+    .replace(/&lt;i&gt;/g, '<i>').replace(/&lt;\/i&gt;/g, '</i>');
 }
 
 async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
@@ -52,19 +54,19 @@ async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
 }
 
 async function runDiscovery() {
-  addLog("🏢 ЗАПУСК ЦИКЛА: Анализ новых публикаций...");
+  addLog("🏢 ЦИКЛ ПОИСКА: Проверка мировых новостей (RU Focus)...");
   
-  // Берем заголовки последних 10 статей для исключения дублей
-  const forbiddenTitles = articles.slice(0, 10).map(a => a.title).join(' | ');
+  const forbiddenTitles = articles.slice(0, 15).map(a => a.title).join(' | ');
 
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "Найди 1-2 последние новости про Solid-State Battery. Используй Google Search для проверки актуальности.",
+      contents: "Найди 1-2 новые важные новости про Solid-State Battery. Сделай красивые структурированные посты.",
       config: { 
-        systemInstruction: `Ты эксперт по АКБ. ИГНОРИРУЙ темы: [${forbiddenTitles}]. 
-        Найди новости за последние 24ч. Ссылка (sourceUrl) должна быть прямой на статью. 
-        Верни JSON массив: [{title, summary, telegramPost, visualPrompt, sourceUrl}]`,
+        systemInstruction: `Ты - главный редактор. ПИШИ ТОЛЬКО НА РУССКОМ. 
+        Исключи темы: [${forbiddenTitles}]. 
+        Пост должен быть разбит на абзацы, с эмодзи и хэштегами на русском.
+        Верни JSON массив объектов: [{title, summary, telegramPost, visualPrompt, sourceUrl}]`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json"
       }
@@ -72,33 +74,34 @@ async function runDiscovery() {
 
     const newItems = JSON.parse(result.text);
     if (!newItems || newItems.length === 0) {
-      addLog("🔎 Новых уникальных новостей не найдено.");
+      addLog("🔎 Новых уникальных новостей не обнаружено.");
       return;
     }
 
     for (const item of newItems) {
-      addLog(`🎨 Оформление: ${item.title.substring(0,40)}...`);
+      addLog(`🎨 Генерация контента для: ${item.title.substring(0,40)}...`);
       
       const imgResp = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `Futuristic lab tech, solid state battery: ${item.visualPrompt}` }] },
+        contents: { parts: [{ text: `High-tech battery tech visualization: ${item.visualPrompt}` }] },
         config: { imageConfig: { aspectRatio: "16:9" } }
       });
       
       let base64 = null;
       for (const p of imgResp.candidates[0].content.parts) if (p.inlineData) base64 = p.inlineData.data;
 
-      const caption = `<b>${item.title}</b>\n\n${formatToTelegramHTML(item.telegramPost)}\n\n🔗 <a href="${item.sourceUrl}">Источник</a>`;
-      const tg = await sendPhotoToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, caption, base64);
+      const formattedPost = formatToTelegramHTML(item.telegramPost);
+      const caption = `<b>${item.title}</b>\n\n${formattedPost}\n\n🔗 <a href="${item.sourceUrl}">Читать оригинал</a>`;
+      
+      await sendPhotoToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, caption, base64);
       
       item.id = Date.now() + Math.random();
       item.imageUrl = base64 ? `data:image/png;base64,${base64}` : null;
       articles.unshift(item);
       addLog(`✅ Опубликовано: ${item.title}`);
     }
-    if (articles.length > 50) articles = articles.slice(0, 50);
   } catch (err) {
-    addLog(`❌ Ошибка в цикле: ${err.message}`);
+    addLog(`❌ Ошибка: ${err.message}`);
   }
 }
 
@@ -106,8 +109,6 @@ app.get('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "ok" 
 app.get('/api/articles', (req, res) => res.json(articles));
 app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 
-// Запуск каждый час на 0-й минуте
 cron.schedule('0 * * * *', runDiscovery);
-
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => addLog(`🚀 Сервер активен на порту ${PORT}`));
+app.listen(PORT, () => addLog(`🚀 Server ready on ${PORT}`));
