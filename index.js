@@ -52,26 +52,39 @@ async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
 }
 
 async function runDiscovery() {
-  addLog("🏢 Поиск прорывов в Solid-State...");
+  addLog("🏢 ЗАПУСК ЦИКЛА: Анализ новых публикаций...");
+  
+  // Берем заголовки последних 10 статей для исключения дублей
+  const forbiddenTitles = articles.slice(0, 10).map(a => a.title).join(' | ');
+
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "Найди 1-2 последние новости про Solid-State Battery breakthroughs за 24ч. Игнорируй повторы.",
+      contents: "Найди 1-2 последние новости про Solid-State Battery. Используй Google Search для проверки актуальности.",
       config: { 
-        systemInstruction: "Верни JSON массив: [{title, summary, telegramPost, visualPrompt, sourceUrl}]",
+        systemInstruction: `Ты эксперт по АКБ. ИГНОРИРУЙ темы: [${forbiddenTitles}]. 
+        Найди новости за последние 24ч. Ссылка (sourceUrl) должна быть прямой на статью. 
+        Верни JSON массив: [{title, summary, telegramPost, visualPrompt, sourceUrl}]`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json"
       }
     });
 
     const newItems = JSON.parse(result.text);
+    if (!newItems || newItems.length === 0) {
+      addLog("🔎 Новых уникальных новостей не найдено.");
+      return;
+    }
+
     for (const item of newItems) {
-      addLog(`🎨 Генерация визуала: ${item.title.substring(0,30)}...`);
+      addLog(`🎨 Оформление: ${item.title.substring(0,40)}...`);
+      
       const imgResp = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `High-tech solid state battery tech: ${item.visualPrompt}` }] },
+        contents: { parts: [{ text: `Futuristic lab tech, solid state battery: ${item.visualPrompt}` }] },
         config: { imageConfig: { aspectRatio: "16:9" } }
       });
+      
       let base64 = null;
       for (const p of imgResp.candidates[0].content.parts) if (p.inlineData) base64 = p.inlineData.data;
 
@@ -81,18 +94,20 @@ async function runDiscovery() {
       item.id = Date.now() + Math.random();
       item.imageUrl = base64 ? `data:image/png;base64,${base64}` : null;
       articles.unshift(item);
-      addLog(`✅ Успешно опубликовано: ${item.title}`);
+      addLog(`✅ Опубликовано: ${item.title}`);
     }
     if (articles.length > 50) articles = articles.slice(0, 50);
   } catch (err) {
-    addLog(`❌ Ошибка цикла: ${err.message}`);
+    addLog(`❌ Ошибка в цикле: ${err.message}`);
   }
 }
 
-app.get('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "triggered" }); });
+app.get('/api/trigger', (req, res) => { runDiscovery(); res.json({ status: "ok" }); });
 app.get('/api/articles', (req, res) => res.json(articles));
-app.get('/api/status', (req, res) => res.json({ logs: logs, online: true }));
+app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 
+// Запуск каждый час на 0-й минуте
 cron.schedule('0 * * * *', runDiscovery);
+
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => addLog(`🚀 Backend Ready on port ${PORT}`));
+app.listen(PORT, () => addLog(`🚀 Сервер активен на порту ${PORT}`));
