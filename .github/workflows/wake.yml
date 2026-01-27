@@ -1,0 +1,12 @@
+
+name: Wake Up Bot
+on:
+  schedule:
+    - cron: '0 * * * *' # Раз в час
+  workflow_dispatch: # Ручной запуск
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Server
+        run: curl -s https://news-bot-server-99uj.onrender.com/api/trigger
