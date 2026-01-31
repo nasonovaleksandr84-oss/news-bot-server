@@ -7,7 +7,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ВАЖНО: На сервере используем Flash для экономии лимитов при авто-запуске
+// Проверка окружения
+if (!process.env.API_KEY) console.error("!!! NO API_KEY !!!");
+if (!process.env.TELEGRAM_TOKEN) console.error("!!! NO TELEGRAM_TOKEN !!!");
+
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 let articles = [];
@@ -25,76 +28,99 @@ const addLog = (tag, msg) => {
 app.post('/api/sync', (req, res) => {
   if (req.body.titles) {
     req.body.titles.forEach(t => postedTitles.add(t));
-    addLog("SYNC", `Обновлено заголовков в памяти: ${postedTitles.size}`);
+    addLog("SYNC", `Синхронизировано ${req.body.titles.length} старых статей.`);
   }
   res.json({ ok: true });
 });
 
 app.get('/api/keep-alive', (req, res) => {
-  addLog("CRON", "Пинг получен. Сервер активен.");
+  addLog("CRON", "Пинг получен. Я не сплю.");
   res.json({ status: "alive" });
 });
 
+// Новый надежный метод отправки через FormData (Node 18+)
 async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
-  if (!base64Image) return { ok: false };
+  if (!base64Image) return { ok: false, description: "No image" };
   
-  // FIX: Правильное формирование multipart/form-data
-  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-  const buffer = Buffer.from(base64Image, 'base64');
-  
-  const payload = Buffer.concat([
-    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`),
-    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="img.png"\r\nContent-Type: image/png\r\n\r\n`),
-    buffer,
-    // ВАЖНО: Добавляем перенос строки ПОСЛЕ буфера картинки перед следующим баундари
-    Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`),
-    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="parse_mode"\r\n\r\nHTML\r\n`),
-    Buffer.from(`--${boundary}--\r\n`)
-  ]);
-
   try {
+    const formData = new FormData();
+    formData.append("chat_id", chatId);
+    
+    // ВАЖНО: Telegram лимит 1024 символа для caption.
+    // Оставляем запас 900 символов, чтобы точно влезло.
+    let safeCaption = caption;
+    if (safeCaption.length > 900) {
+        addLog("WARN", `Текст слишком длинный (${safeCaption.length}), обрезаю...`);
+        safeCaption = safeCaption.substring(0, 900) + "... (Читать далее в источнике)";
+    }
+    
+    formData.append("caption", safeCaption);
+    formData.append("parse_mode", "HTML");
+
+    // Конвертация base64 в Blob
+    const buffer = Buffer.from(base64Image, 'base64');
+    const blob = new Blob([buffer], { type: 'image/png' });
+    formData.append("photo", blob, "img.png");
+
     const r = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
       method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-      body: payload
+      body: formData
     });
+    
     return await r.json();
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, description: e.message };
   }
 }
 
 async function runDiscovery(tag = "AUTO") {
   const now = Date.now();
-  if (now - lastRunTime < 3 * 60 * 1000) return;
+  // Кулдаун 3 минуты
+  if (now - lastRunTime < 3 * 60 * 1000) {
+    addLog(tag, "Слишком рано для нового поиска.");
+    return;
+  }
   lastRunTime = now;
 
-  addLog(tag, "Поиск новостей...");
+  addLog(tag, "Начинаю поиск новостей...");
   const history = Array.from(postedTitles).slice(-50).join(' | ');
 
   try {
+    // 1. Поиск
     const result = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "Find 1 fresh breakthrough in Solid-State Batteries. Focus China.",
+      contents: "Find 1 HOT breaking news about Solid-State Batteries in China (last 48h).",
       config: { 
-        systemInstruction: `You are a solid-state battery expert.
-        Output MUST be valid JSON array.
-        Ensure 'telegramPost' contains a detailed summary in Russian (HTML format: <b>, <i>, <a href="...">).
-        Avoid: [${history}].`,
+        systemInstruction: `You are a news bot.
+        Return JSON array.
+        Field 'telegramPost': detailed Russian summary with HTML tags (<b>Title</b>, <i>text</i>).
+        CRITICAL: Keep 'telegramPost' UNDER 800 CHARACTERS to fit Telegram limits.
+        Avoid these titles: [${history}]`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json"
       }
     });
 
     const newItems = JSON.parse(result.text || "[]");
-    if (!newItems || newItems.length === 0) return;
+    
+    if (!newItems || newItems.length === 0) {
+      addLog(tag, "Новостей не найдено.");
+      return;
+    }
+
+    addLog(tag, `Найдено потенциальных новостей: ${newItems.length}`);
 
     for (const item of newItems) {
-      if (postedTitles.has(item.title)) continue;
+      if (postedTitles.has(item.title)) {
+        addLog(tag, `Скип (уже было): ${item.title}`);
+        continue;
+      }
 
+      // 2. Генерация картинки
+      addLog(tag, "Генерирую обложку...");
       const imgResp = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `Industrial lab photo, high tech, futuristic battery: ${item.visualPrompt}` }] },
+        contents: { parts: [{ text: `Cinematic futuristic battery lab, glowing energy, high tech: ${item.visualPrompt}` }] },
         config: { imageConfig: { aspectRatio: "16:9" } }
       });
       
@@ -103,24 +129,27 @@ async function runDiscovery(tag = "AUTO") {
         for (const p of imgResp.candidates[0].content.parts) if (p.inlineData) base64 = p.inlineData.data;
       }
 
-      // Формируем подпись. Если telegramPost пустой (сбой AI), ставим хотя бы заголовок.
-      const postText = item.telegramPost || item.summary || "Новость без описания.";
-      const caption = `<b>${item.title}</b>\n\n${postText}`;
-      
+      if (!base64) {
+        addLog("ERROR", "Не удалось сгенерировать картинку.");
+        continue;
+      }
+
+      // 3. Отправка
+      const caption = `<b>${item.title}</b>\n\n${item.telegramPost || item.summary}`;
       const tgRes = await sendPhotoToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, caption, base64);
       
       if (tgRes.ok) {
         postedTitles.add(item.title);
         item.id = Date.now().toString();
-        item.imageUrl = base64 ? `data:image/png;base64,${base64}` : null;
+        item.imageUrl = `data:image/png;base64,${base64}`;
         articles.unshift(item);
-        addLog("POST", `Опубликовано: ${item.title}`);
+        addLog("POST", `Успешно опубликовано: ${item.title}`);
       } else {
-        addLog("ERROR", `Ошибка TG: ${tgRes.description || 'unknown'}`);
+        addLog("ERROR", `Telegram отказал: ${tgRes.description}`);
       }
     }
   } catch (err) {
-    addLog("ERROR", err.message);
+    addLog("ERROR", `Сбой процесса: ${err.message}`);
   }
 }
 
@@ -133,4 +162,7 @@ app.get('/api/articles', (req, res) => res.json(articles));
 app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on ${PORT}`);
+  addLog("SYS", "Сервер запущен v1.3 (Limit Fix)");
+});
