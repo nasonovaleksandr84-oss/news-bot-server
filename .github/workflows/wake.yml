@@ -1,12 +1,19 @@
 
-name: Wake Up Bot
+name: Wake-Up-System
 on:
   schedule:
-    - cron: '0 * * * *' # Раз в час
-  workflow_dispatch: # Ручной запуск
+    - cron: '*/10 * * * *' # Каждые 10 минут
+    - cron: '0 * * * *'    # Раз в час
+  workflow_dispatch:
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Server
+      - name: Keep Alive
+        run: curl -s https://news-bot-server-99uj.onrender.com/api/keep-alive
+  trigger:
+    if: github.event.schedule == '0 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto Search
         run: curl -s https://news-bot-server-99uj.onrender.com/api/trigger
