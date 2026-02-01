@@ -72,8 +72,14 @@ async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
   try {
     const formData = new FormData();
     formData.append("chat_id", chatId);
-    // Telegram caption limit is 1024. We aim for 950 + tags.
-    let safeCaption = caption.length > 1000 ? caption.substring(0, 1000) + "..." : caption;
+    
+    // Telegram CAPTION LIMIT is 1024 characters.
+    // We strictly truncate to 1024 to prevent API errors.
+    let safeCaption = caption;
+    if (safeCaption.length > 1024) {
+        safeCaption = safeCaption.substring(0, 1021) + "...";
+    }
+    
     formData.append("caption", safeCaption);
     formData.append("parse_mode", "HTML");
     const buffer = Buffer.from(base64Image, 'base64');
@@ -129,14 +135,15 @@ async function runDiscovery(tag = "AUTO") {
         3. Write a deep technical summary in Russian for Telegram.
         
         FORMATTING RULES (Telegram HTML):
-        - Use <b>Title</b> for headline.
+        - DO NOT include the title in the 'telegramPost' field (I will add it manually).
+        - Start directly with the introduction text.
         - Use double line breaks (\n\n) between paragraphs.
         - Use standard hyphens (- ) for bullet points. NO EMOJI BULLETS.
         - Structure: 
              [Brief Intro]
              [Technical Details/Data points using bullets]
              [Why it matters/Conclusion]
-        - Length: MUST be between 800 and 950 characters. Be detailed.
+        - Length: 'telegramPost' MUST be between 650 and 750 characters (to leave room for title, link and tags within 1024 limit).
         
         CRITICAL: 
         - DO NOT invent news. 
@@ -204,10 +211,15 @@ async function runDiscovery(tag = "AUTO") {
       }
 
       // 3. Assemble Caption with Link
-      // We assume item.sourceUrl is populated by the model from grounding data.
-      const linkHtml = item.sourceUrl ? `<a href="${item.sourceUrl}">🔗 Читать источник</a>` : "";
+      // Ensure we don't duplicate title if the AI ignored instructions
+      let bodyText = item.telegramPost.trim();
+      if (bodyText.startsWith(item.title)) {
+         bodyText = bodyText.substring(item.title.length).trim();
+      }
       
-      const caption = `<b>${item.title}</b>\n\n${item.telegramPost}\n\n${linkHtml}`;
+      const linkHtml = item.sourceUrl ? `<a href="${item.sourceUrl}">🔗 Источник</a>` : "";
+      
+      const caption = `<b>${item.title}</b>\n\n${bodyText}\n\n${linkHtml}`;
       
       const tgRes = await sendPhotoToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, caption, base64);
       
@@ -237,5 +249,5 @@ app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
-  addLog("SYS", "Server v2.1 (Deep Text + Source Links)");
+  addLog("SYS", "Server v2.2 (Single Title + Safe 1024 Limit)");
 });
