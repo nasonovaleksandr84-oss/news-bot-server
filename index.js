@@ -72,7 +72,8 @@ async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
   try {
     const formData = new FormData();
     formData.append("chat_id", chatId);
-    let safeCaption = caption.length > 950 ? caption.substring(0, 950) + "..." : caption;
+    // Telegram caption limit is 1024. We aim for 950 + tags.
+    let safeCaption = caption.length > 1000 ? caption.substring(0, 1000) + "..." : caption;
     formData.append("caption", safeCaption);
     formData.append("parse_mode", "HTML");
     const buffer = Buffer.from(base64Image, 'base64');
@@ -97,12 +98,14 @@ async function runDiscovery(tag = "AUTO") {
   }
   lastRunTime = now;
 
+  // --- HARDCORE TOPIC ROTATION (DEEP TECH) ---
   const subTopics = [
-    "Solid Electrolyte Material Science",
-    "Anode-Free Battery Technology",
-    "Mass Production Factory Updates",
-    "Automotive OEM Partnerships for SSB",
-    "Silicon Anode integration with Solid State"
+    "Sulfide-based Solid Electrolytes breakthrough",
+    "Oxide Solid State Battery manufacturing process",
+    "Polymer-based solid electrolyte innovations",
+    "Anode-free Lithium Metal Battery stability",
+    "Dry electrode coating for Solid State Batteries",
+    "Solid-State Battery pilot line production news"
   ];
   const currentTopic = subTopics[Math.floor(Math.random() * subTopics.length)];
 
@@ -112,21 +115,33 @@ async function runDiscovery(tag = "AUTO") {
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Find 1 significant news update about Solid-State Batteries.
-      FOCUS TOPIC: ${currentTopic}.
-      Date context: ${new Date().toLocaleDateString('en-US')}. Look for events in the last 48 hours.
+      contents: `Find 1 BREAKING technical news/report about Solid-State Batteries.
+      STRICT FOCUS: ${currentTopic}.
+      Search context: Global scientific journals, OEM press releases, Battery specialized news.
+      Date context: ${new Date().toLocaleDateString('en-US')}. Look for events in the last 72 hours.
       `,
       config: { 
-        systemInstruction: `You are a news bot.
-        Return JSON array.
-        Field 'telegramPost': detailed Russian summary with HTML tags (<b>, <i>).
-        CONSTRAINTS:
-        1. 'telegramPost' MUST be under 600 characters.
-        2. ALWAYS add 3-5 hashtags at the end.
-        3. 'title': Short Russian headline.
-        4. 'visualPrompt': Extremely specific visual description of the news subject.
+        systemInstruction: `You are a Senior Battery Engineer and Tech Journalist.
         
-        CRITICAL: Check against history. Do NOT suggest news similar to: [${history}]`,
+        TASK:
+        1. Find 1 specific new development in Solid-State Batteries (SSB).
+        2. Extract the DIRECT SOURCE URL (link to the article).
+        3. Write a deep technical summary in Russian for Telegram.
+        
+        FORMATTING RULES (Telegram HTML):
+        - Use <b>Title</b> for headline.
+        - Use double line breaks (\n\n) between paragraphs.
+        - Use standard hyphens (- ) for bullet points. NO EMOJI BULLETS.
+        - Structure: 
+             [Brief Intro]
+             [Technical Details/Data points using bullets]
+             [Why it matters/Conclusion]
+        - Length: MUST be between 800 and 950 characters. Be detailed.
+        
+        CRITICAL: 
+        - DO NOT invent news. 
+        - DO NOT use topics from history: [${history}].
+        - REJECT news if it's not strictly about Solid-State Batteries.`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
@@ -136,9 +151,10 @@ async function runDiscovery(tag = "AUTO") {
             properties: {
               title: { type: Type.STRING },
               telegramPost: { type: Type.STRING },
-              visualPrompt: { type: Type.STRING }
+              visualPrompt: { type: Type.STRING },
+              sourceUrl: { type: Type.STRING, description: "The direct URL found by Google Search" }
             },
-            required: ["title", "telegramPost", "visualPrompt"]
+            required: ["title", "telegramPost", "visualPrompt", "sourceUrl"]
           }
         }
       }
@@ -156,20 +172,20 @@ async function runDiscovery(tag = "AUTO") {
       for (const oldTitle of postedTitles) {
         if (isSimilar(oldTitle, item.title)) {
           isDuplicate = true;
-          addLog(tag, `Дубликат (Fuzzy): ${item.title} == ${oldTitle}`);
+          addLog(tag, `Дубликат (Fuzzy): ${item.title}`);
           break;
         }
       }
       if (isDuplicate) continue;
 
-      // 2. Фото: Raw News Style + VISUAL ENTROPY
+      // 2. Фото: Raw News Style
       addLog(tag, "Генерация фото...");
       const atmosphere = getRandomAtmosphere();
       const visualPrompt = `News agency photography, Reuters style, raw unedited photo, grainy, real world laboratory, messy wires, steel equipment, boring lighting. 
       ATMOSPHERE: ${atmosphere}.
       SUBJECT: ${item.visualPrompt}.
       NO 3D RENDER, NO CGI, NO NEON.
-      UUID: ${Date.now()}`; // Cache busting
+      UUID: ${Date.now()}`; 
 
       const imgResp = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -187,7 +203,12 @@ async function runDiscovery(tag = "AUTO") {
         continue;
       }
 
-      const caption = `<b>${item.title}</b>\n\n${item.telegramPost}`;
+      // 3. Assemble Caption with Link
+      // We assume item.sourceUrl is populated by the model from grounding data.
+      const linkHtml = item.sourceUrl ? `<a href="${item.sourceUrl}">🔗 Читать источник</a>` : "";
+      
+      const caption = `<b>${item.title}</b>\n\n${item.telegramPost}\n\n${linkHtml}`;
+      
       const tgRes = await sendPhotoToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, caption, base64);
       
       if (tgRes.ok) {
@@ -216,5 +237,5 @@ app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
-  addLog("SYS", "Server v2.0 (Visual Entropy + Anti-Duplicate)");
+  addLog("SYS", "Server v2.1 (Deep Text + Source Links)");
 });
