@@ -1,7 +1,7 @@
 
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenAI } = require("@google/genai");
+const { GoogleGenAI, Type } = require("@google/genai");
 
 const app = express();
 app.use(cors());
@@ -43,11 +43,11 @@ async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
     const formData = new FormData();
     formData.append("chat_id", chatId);
     
-    // Лимит 900 символов
+    // Лимит Telegram 1024 символа.
     let safeCaption = caption;
-    if (safeCaption.length > 900) {
-        addLog("WARN", `Обрезаю текст: ${safeCaption.length} > 900`);
-        safeCaption = safeCaption.substring(0, 900) + "...";
+    if (safeCaption.length > 950) {
+        addLog("WARN", `Обрезаю текст: ${safeCaption.length} > 950`);
+        safeCaption = safeCaption.substring(0, 950) + "...";
     }
     formData.append("caption", safeCaption);
     formData.append("parse_mode", "HTML");
@@ -80,22 +80,36 @@ async function runDiscovery(tag = "AUTO") {
   const history = Array.from(postedTitles).slice(-50).join(' | ');
 
   try {
-    // Обновленный промпт: ГЛОБАЛЬНЫЙ поиск
+    // 1. Поиск: Жесткая схема (Schema) гарантирует наличие title
     const result = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Find 1 significant news or technical update about Solid-State Batteries GLOBALLY. 
-      Search everywhere: China, USA, Korea, Japan, Europe. 
-      While China is active, do not ignore major updates from Toyota, Samsung, Solid Power, etc.
+      Search everywhere: China, USA, Korea, Japan, Europe.
       Date context: Today is ${today}. Look for events in the last 72 hours.
       `,
       config: { 
         systemInstruction: `You are a news bot.
         Return JSON array.
-        Field 'telegramPost': detailed Russian summary (HTML: <b>, <i>).
-        Max length 'telegramPost': 800 chars.
-        Avoid titles: [${history}]`,
+        Field 'telegramPost': detailed Russian summary with HTML tags (<b>, <i>).
+        CONSTRAINTS:
+        1. 'telegramPost' MUST be under 600 characters.
+        2. ALWAYS add 3-5 hashtags at the end.
+        3. 'title': Short Russian headline.
+        Avoid these titles: [${history}]`,
         tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              telegramPost: { type: Type.STRING },
+              visualPrompt: { type: Type.STRING }
+            },
+            required: ["title", "telegramPost", "visualPrompt"]
+          }
+        }
       }
     });
 
@@ -114,10 +128,11 @@ async function runDiscovery(tag = "AUTO") {
         continue;
       }
 
+      // 2. Фото: Raw News Style
       addLog(tag, "Генерация фото...");
       const imgResp = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `High tech lab, solid state battery cell, futuristic: ${item.visualPrompt}` }] },
+        contents: { parts: [{ text: `News agency photography, Reuters style, raw unedited photo, grainy, real world laboratory, messy wires, steel equipment, boring lighting. NO 3D RENDER, NO CGI, NO NEON: ${item.visualPrompt}` }] },
         config: { imageConfig: { aspectRatio: "16:9" } }
       });
       
@@ -131,7 +146,10 @@ async function runDiscovery(tag = "AUTO") {
         continue;
       }
 
-      const caption = `<b>${item.title}</b>\n\n${item.telegramPost || item.summary}`;
+      // 3. Сборка caption. 
+      // Гарантируем, что title существует благодаря Schema.
+      const caption = `<b>${item.title}</b>\n\n${item.telegramPost}`;
+
       const tgRes = await sendPhotoToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, caption, base64);
       
       if (tgRes.ok) {
@@ -160,5 +178,5 @@ app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
-  addLog("SYS", "Server v1.5 (Global Search)");
+  addLog("SYS", "Server v1.8 (Schema Enforced)");
 });
