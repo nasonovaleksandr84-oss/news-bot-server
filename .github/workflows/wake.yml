@@ -2,8 +2,8 @@
 name: Wake-Up-System
 on:
   schedule:
-    - cron: '*/10 * * * *' # Каждые 10 минут
-    - cron: '0 * * * *'    # Раз в час
+    - cron: '*/10 * * * *'  # Keep-alive every 10 min
+    - cron: '*/20 * * * *'  # Auto-search every 20 min
   workflow_dispatch:
 jobs:
   ping:
@@ -12,7 +12,7 @@ jobs:
       - name: Keep Alive
         run: curl -s https://news-bot-server-99uj.onrender.com/api/keep-alive
   trigger:
-    if: github.event.schedule == '0 * * * *'
+    if: github.event.schedule != '*/10 * * * *' # Don't run on just keep-alive ticks if they align
     runs-on: ubuntu-latest
     steps:
       - name: Auto Search
