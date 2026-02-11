@@ -44,16 +44,6 @@ const getPairs = (s) => {
   return pairs;
 };
 
-// --- VISUAL ENTROPY ---
-const getRandomAtmosphere = () => {
-  const angles = ["Low angle shot", "Top-down view", "Close-up macro", "Wide shot", "Over the shoulder"];
-  const lights = ["Cold fluorescent light", "Dim emergency lighting", "Harsh industrial shadows", "Morning natural light from window"];
-  const details = ["Focus on hands in gloves", "Focus on screen data", "Focus on metal texture", "Blurred background"];
-  
-  const r = (arr) => arr[Math.floor(Math.random() * arr.length)];
-  return `${r(angles)}, ${r(lights)}, ${r(details)}`;
-};
-
 app.post('/api/sync', (req, res) => {
   if (req.body.titles) {
     req.body.titles.forEach(t => postedTitles.add(t));
@@ -67,28 +57,18 @@ app.get('/api/keep-alive', (req, res) => {
   res.json({ status: "alive" });
 });
 
-async function sendPhotoToTelegram(chatId, token, caption, base64Image) {
-  if (!base64Image) return { ok: false, description: "No image" };
+// v3.1: Switched to sendMessage for better reliability and higher text limits (4096 chars)
+async function sendMessageToTelegram(chatId, token, text) {
   try {
-    const formData = new FormData();
-    formData.append("chat_id", chatId);
-    
-    // Telegram CAPTION LIMIT is 1024 characters.
-    // We strictly truncate to 1024 to prevent API errors.
-    let safeCaption = caption;
-    if (safeCaption.length > 1024) {
-        safeCaption = safeCaption.substring(0, 1021) + "...";
-    }
-    
-    formData.append("caption", safeCaption);
-    formData.append("parse_mode", "HTML");
-    const buffer = Buffer.from(base64Image, 'base64');
-    const blob = new Blob([buffer], { type: 'image/png' });
-    formData.append("photo", blob, "img.png");
-
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
-      body: formData
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: false 
+      })
     });
     return await r.json();
   } catch (e) {
@@ -104,51 +84,61 @@ async function runDiscovery(tag = "AUTO") {
   }
   lastRunTime = now;
 
-  // --- HARDCORE TOPIC ROTATION (DEEP TECH) ---
-  const subTopics = [
-    "Sulfide-based Solid Electrolytes breakthrough",
-    "Oxide Solid State Battery manufacturing process",
-    "Polymer-based solid electrolyte innovations",
-    "Anode-free Lithium Metal Battery stability",
-    "Dry electrode coating for Solid State Batteries",
-    "Solid-State Battery pilot line production news"
+  // --- CHINA DEEP DIVE CONFIGURATION ---
+  const clusters = [
+    // Cluster A: Top Vertical Portals
+    "site:battery100.org OR site:cnpowder.com.cn OR site:libattery.ofweek.com OR site:gg-lb.com",
+    // Cluster B: Business & Official
+    "site:36kr.com OR site:nbd.com.cn OR site:cbea.com OR site:ciaps.org.cn",
+    // Cluster C: Niche, Tech & Institutes
+    "site:hairongcn.com OR site:5iev.com OR site:chinareports.org.cn"
   ];
-  const currentTopic = subTopics[Math.floor(Math.random() * subTopics.length)];
 
-  addLog(tag, `Поиск: ${currentTopic}`);
+  const searchQueries = [
+    "固态电池 (Solid State Battery)",
+    "全固态电池 (All-Solid-State Battery)",
+    "硫化物电解质 (Sulfide Electrolyte)",
+    "干法电极 (Dry Electrode)",
+    "硅基负极 (Silicon Anode)",
+    "金属锂负极 (Lithium Metal Anode)"
+  ];
+
+  const currentCluster = clusters[Math.floor(Math.random() * clusters.length)];
+  const currentKeyword = searchQueries[Math.floor(Math.random() * searchQueries.length)];
+
+  addLog(tag, `Поиск в Китае: ${currentKeyword}`);
   const history = Array.from(postedTitles).slice(-50).join(' | ');
 
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Find 1 BREAKING technical news/report about Solid-State Batteries.
-      STRICT FOCUS: ${currentTopic}.
-      Search context: Global scientific journals, OEM press releases, Battery specialized news.
-      Date context: ${new Date().toLocaleDateString('en-US')}. Look for events in the last 72 hours.
+      contents: `Find 1 BREAKING technical news/report in CHINESE about Solid-State Batteries.
+      STRICT FOCUS: ${currentKeyword}.
+      SEARCH SOURCE LIMIT: ${currentCluster}.
+      Date context: ${new Date().toLocaleDateString('zh-CN')}. Look for events in the last 48 hours.
       `,
       config: { 
-        systemInstruction: `You are a Senior Battery Engineer and Tech Journalist.
+        systemInstruction: `You are an Expert Analyst in the Chinese Battery Market (SSB).
         
         TASK:
-        1. Find 1 specific new development in Solid-State Batteries (SSB).
-        2. Extract the DIRECT SOURCE URL (link to the article).
-        3. Write a deep technical summary in Russian for Telegram.
+        1. Find 1 specific new development in Solid-State Batteries (SSB) from the provided CHINESE sources.
+        2. Analyze the source.
+        3. Write a professional Telegram post in RUSSIAN.
         
         FORMATTING RULES (Telegram HTML):
         - DO NOT include the title in the 'telegramPost' field (I will add it manually).
         - Start directly with the introduction text.
         - Use double line breaks (\n\n) between paragraphs.
-        - Use standard hyphens (- ) for bullet points. NO EMOJI BULLETS.
         - Structure: 
-             [Brief Intro]
-             [Technical Details/Data points using bullets]
-             [Why it matters/Conclusion]
-        - Length: 'telegramPost' MUST be between 650 and 750 characters (to leave room for title, link and tags within 1024 limit).
+             [Intro: What happened?]
+             [Technical Details: Efficiency, Materials, Production scale]
+             [Impact: Why this Chinese breakthrough matters]
+        - Length: 'telegramPost' should be detailed (approx 800-1200 chars).
         
         CRITICAL: 
-        - DO NOT invent news. 
-        - DO NOT use topics from history: [${history}].
-        - REJECT news if it's not strictly about Solid-State Batteries.`,
+        - Source material MUST be from China.
+        - Output language MUST be Russian.
+        - DO NOT use topics from history: [${history}].`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
@@ -156,22 +146,32 @@ async function runDiscovery(tag = "AUTO") {
           items: {
             type: Type.OBJECT,
             properties: {
-              title: { type: Type.STRING },
-              telegramPost: { type: Type.STRING },
-              visualPrompt: { type: Type.STRING },
-              sourceUrl: { type: Type.STRING, description: "The direct URL found by Google Search" }
+              title: { type: Type.STRING, description: "Title in Russian" },
+              telegramPost: { type: Type.STRING, description: "Body text in Russian. NO TITLE." },
+              sourceUrl: { type: Type.STRING, description: "Leave empty, I will use grounding." }
             },
-            required: ["title", "telegramPost", "visualPrompt", "sourceUrl"]
+            required: ["title", "telegramPost"]
           }
         }
       }
     });
 
+    // 1. Parse JSON
     const newItems = JSON.parse(result.text || "[]");
     
     if (!newItems || newItems.length === 0) {
-      addLog(tag, "Ничего нового не найдено.");
+      addLog(tag, "Ничего нового не найдено (CN).");
       return;
+    }
+
+    // 2. Extract REAL URL from Grounding Metadata (Fixing Broken Links)
+    let groundingUrl = null;
+    const chunks = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    for (const chunk of chunks) {
+      if (chunk.web?.uri) {
+        groundingUrl = chunk.web.uri;
+        break; // Take the first valid source
+      }
     }
 
     for (const item of newItems) {
@@ -179,54 +179,32 @@ async function runDiscovery(tag = "AUTO") {
       for (const oldTitle of postedTitles) {
         if (isSimilar(oldTitle, item.title)) {
           isDuplicate = true;
-          addLog(tag, `Дубликат (Fuzzy): ${item.title}`);
+          addLog(tag, `Дубликат: ${item.title}`);
           break;
         }
       }
       if (isDuplicate) continue;
 
-      // 2. Фото: Raw News Style
-      addLog(tag, "Генерация фото...");
-      const atmosphere = getRandomAtmosphere();
-      const visualPrompt = `News agency photography, Reuters style, raw unedited photo, grainy, real world laboratory, messy wires, steel equipment, boring lighting. 
-      ATMOSPHERE: ${atmosphere}.
-      SUBJECT: ${item.visualPrompt}.
-      NO 3D RENDER, NO CGI, NO NEON.
-      UUID: ${Date.now()}`; 
-
-      const imgResp = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: visualPrompt }] },
-        config: { imageConfig: { aspectRatio: "16:9" } }
-      });
-      
-      let base64 = null;
-      if (imgResp.candidates?.[0]?.content?.parts) {
-        for (const p of imgResp.candidates[0].content.parts) if (p.inlineData) base64 = p.inlineData.data;
-      }
-
-      if (!base64) {
-        addLog("ERROR", "Ошибка генерации фото");
-        continue;
-      }
-
-      // 3. Assemble Caption with Link
-      // Ensure we don't duplicate title if the AI ignored instructions
+      // 3. Assemble Text Message
       let bodyText = item.telegramPost.trim();
       if (bodyText.startsWith(item.title)) {
          bodyText = bodyText.substring(item.title.length).trim();
       }
       
-      const linkHtml = item.sourceUrl ? `<a href="${item.sourceUrl}">🔗 Источник</a>` : "";
+      // Prefer Grounding URL (100% valid) over Model URL (often hallucinated)
+      const finalUrl = groundingUrl || item.sourceUrl;
+      const linkHtml = finalUrl ? `<a href="${finalUrl}">🔗 Источник (CN)</a>` : "";
       
-      const caption = `<b>${item.title}</b>\n\n${bodyText}\n\n${linkHtml}`;
+      const message = `<b>${item.title}</b>\n\n${bodyText}\n\n${linkHtml}`;
       
-      const tgRes = await sendPhotoToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, caption, base64);
+      // 4. Send as TEXT (No Photo) to avoid limits and timeouts
+      addLog(tag, "Отправка в TG...");
+      const tgRes = await sendMessageToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, message);
       
       if (tgRes.ok) {
         postedTitles.add(item.title);
         item.id = Date.now().toString();
-        item.imageUrl = `data:image/png;base64,${base64}`;
+        // Remove image URL from stored item as we don't generate it anymore
         articles.unshift(item);
         addLog("POST", `Опубликовано: ${item.title}`);
       } else {
@@ -249,5 +227,5 @@ app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
-  addLog("SYS", "Server v2.2 (Single Title + Safe 1024 Limit)");
+  addLog("SYS", "Server v3.1 (China Text-Only Mode)");
 });
