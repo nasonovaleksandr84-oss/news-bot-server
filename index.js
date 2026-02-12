@@ -57,7 +57,6 @@ app.get('/api/keep-alive', (req, res) => {
   res.json({ status: "alive" });
 });
 
-// v3.1: Switched to sendMessage for better reliability and higher text limits (4096 chars)
 async function sendMessageToTelegram(chatId, token, text) {
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -84,61 +83,85 @@ async function runDiscovery(tag = "AUTO") {
   }
   lastRunTime = now;
 
-  // --- CHINA DEEP DIVE CONFIGURATION ---
-  const clusters = [
-    // Cluster A: Top Vertical Portals
-    "site:battery100.org OR site:cnpowder.com.cn OR site:libattery.ofweek.com OR site:gg-lb.com",
-    // Cluster B: Business & Official
-    "site:36kr.com OR site:nbd.com.cn OR site:cbea.com OR site:ciaps.org.cn",
-    // Cluster C: Niche, Tech & Institutes
-    "site:hairongcn.com OR site:5iev.com OR site:chinareports.org.cn"
+  // --- v4.0 GLOBAL RADAR CONFIGURATION ---
+  const zones = [
+    {
+      id: "JP",
+      flag: "🇯🇵",
+      name: "JAPAN",
+      whitelist: "site:global.toyota OR site:asia.nikkei.com OR site:smm.co.jp OR site:idemitsu.com OR site:ithome.com",
+      keywords: ["全固体電池", "Solid-State Battery Production 2027", "Idemitsu Sulfide", "Toyota Solid State"]
+    },
+    {
+      id: "KR",
+      flag: "🇰🇷",
+      name: "KOREA",
+      whitelist: "site:koreaherald.com OR site:skinnonews.com OR site:samsungsdi.com OR site:lgensol.com OR site:hyundai.com OR site:korean.net",
+      keywords: ["전고체 배터리", "황화물계", "Solid-State Battery Pilot Line", "Samsung SDI Solid Power"]
+    },
+    {
+      id: "US",
+      flag: "🇺🇸",
+      name: "USA",
+      whitelist: "site:businesswire.com OR site:factorialenergy.com OR site:solidpowerbattery.com OR site:karmanewsroom.com",
+      keywords: ["Factorial Energy", "Solid Power BMW", "Solid-State Battery JV", "Lithium-Metal Anode"]
+    },
+    {
+      id: "EU",
+      flag: "🇪🇺",
+      name: "EUROPE",
+      whitelist: "site:syensqo.com OR site:fraunhofer.de OR site:altechgroup.com OR site:warwick.ac.uk",
+      keywords: ["Solid-State Battery Consortium", "Sodium-Chloride Battery", "Sulfide Electrolyte Europe"]
+    },
+    {
+      id: "CN",
+      flag: "🇨🇳",
+      name: "CHINA",
+      whitelist: "site:battery100.org OR site:cnpowder.com.cn OR site:libattery.ofweek.com OR site:gg-lb.com OR site:36kr.com",
+      keywords: ["固态电池", "全固态电池", "硫化物电解质"]
+    }
   ];
 
-  const searchQueries = [
-    "固态电池 (Solid State Battery)",
-    "全固态电池 (All-Solid-State Battery)",
-    "硫化物电解质 (Sulfide Electrolyte)",
-    "干法电极 (Dry Electrode)",
-    "硅基负极 (Silicon Anode)",
-    "金属锂负极 (Lithium Metal Anode)"
-  ];
+  // Random Zone Selection
+  const zone = zones[Math.floor(Math.random() * zones.length)];
+  const currentKeyword = zone.keywords[Math.floor(Math.random() * zone.keywords.length)];
+  const query = `Find 1 BREAKING news about Solid-State Batteries in ${zone.name}. Keywords: ${currentKeyword}`;
 
-  const currentCluster = clusters[Math.floor(Math.random() * clusters.length)];
-  const currentKeyword = searchQueries[Math.floor(Math.random() * searchQueries.length)];
-
-  addLog(tag, `Поиск в Китае: ${currentKeyword}`);
+  addLog(tag, `Radar: [${zone.flag} ${zone.id}] ${currentKeyword}`);
   const history = Array.from(postedTitles).slice(-50).join(' | ');
 
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Find 1 BREAKING technical news/report in CHINESE about Solid-State Batteries.
-      STRICT FOCUS: ${currentKeyword}.
-      SEARCH SOURCE LIMIT: ${currentCluster}.
-      Date context: ${new Date().toLocaleDateString('zh-CN')}. Look for events in the last 48 hours.
+      contents: `${query}
+      SEARCH LIMIT: ${zone.whitelist}.
+      Date context: ${new Date().toLocaleDateString()}.
       `,
       config: { 
-        systemInstruction: `You are an Expert Analyst in the Chinese Battery Market (SSB).
+        systemInstruction: `You are an Expert Analyst in the Global Solid-State Battery Market.
+        
+        CURRENT ZONE: ${zone.name} (${zone.flag}).
+        DATE: ${new Date().toISOString()}.
         
         TASK:
-        1. Find 1 specific new development in Solid-State Batteries (SSB) from the provided CHINESE sources.
+        1. Find 1 specific new development in SSB from the provided sources.
         2. Analyze the source.
         3. Write a professional Telegram post in RUSSIAN.
         
-        FORMATTING RULES (Telegram HTML):
-        - DO NOT include the title in the 'telegramPost' field (I will add it manually).
-        - Start directly with the introduction text.
-        - Use double line breaks (\n\n) between paragraphs.
-        - Structure: 
-             [Intro: What happened?]
-             [Technical Details: Efficiency, Materials, Production scale]
-             [Impact: Why this Chinese breakthrough matters]
-        - Length: 'telegramPost' should be detailed (approx 800-1200 chars).
+        RULES:
+        - **MONEY:** If you see any currency (CNY, JPY, KRW, EUR), CONVERT it to USD and put in brackets (e.g. "3 млрд юаней (~$415 млн)").
+        - **DATE CHECK:** Check the event date in the text. If > 48 hours ago -> IGNORE (return empty []).
+        - **NO TITLE:** Do not include a title in 'telegramPost'.
         
-        CRITICAL: 
-        - Source material MUST be from China.
-        - Output language MUST be Russian.
-        - DO NOT use topics from history: [${history}].`,
+        STRUCTURE (Telegram HTML):
+        ${zone.flag} #${zone.name}
+        
+        [Intro: What happened?]
+        [Details: Specs, Money (in USD), Dates]
+        [Impact: Why it matters]
+        
+        Output language: Russian.
+        Exclude topics: [${history}].`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
@@ -160,18 +183,24 @@ async function runDiscovery(tag = "AUTO") {
     const newItems = JSON.parse(result.text || "[]");
     
     if (!newItems || newItems.length === 0) {
-      addLog(tag, "Ничего нового не найдено (CN).");
+      addLog(tag, `[${zone.id}] Пусто или старо.`);
       return;
     }
 
-    // 2. Extract REAL URL from Grounding Metadata (Fixing Broken Links)
+    // 2. Extract REAL URL from Grounding Metadata
     let groundingUrl = null;
     const chunks = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     for (const chunk of chunks) {
       if (chunk.web?.uri) {
         groundingUrl = chunk.web.uri;
-        break; // Take the first valid source
+        break; 
       }
+    }
+
+    // v4.0 STRICT RULE: No Grounding URL = No Post
+    if (!groundingUrl) {
+       addLog(tag, `[${zone.id}] SKIP: Нет подтвержденной ссылки (Grounding).`);
+       return;
     }
 
     for (const item of newItems) {
@@ -187,24 +216,21 @@ async function runDiscovery(tag = "AUTO") {
 
       // 3. Assemble Text Message
       let bodyText = item.telegramPost.trim();
+      // Remove title if model accidentally added it
       if (bodyText.startsWith(item.title)) {
          bodyText = bodyText.substring(item.title.length).trim();
       }
       
-      // Prefer Grounding URL (100% valid) over Model URL (often hallucinated)
-      const finalUrl = groundingUrl || item.sourceUrl;
-      const linkHtml = finalUrl ? `<a href="${finalUrl}">🔗 Источник (CN)</a>` : "";
-      
+      const linkHtml = `<a href="${groundingUrl}">🔗 Источник (${zone.id})</a>`;
       const message = `<b>${item.title}</b>\n\n${bodyText}\n\n${linkHtml}`;
       
-      // 4. Send as TEXT (No Photo) to avoid limits and timeouts
-      addLog(tag, "Отправка в TG...");
+      addLog(tag, `Отправка [${zone.id}] в TG...`);
       const tgRes = await sendMessageToTelegram(process.env.TELEGRAM_CHAT_ID, process.env.TELEGRAM_TOKEN, message);
       
       if (tgRes.ok) {
         postedTitles.add(item.title);
         item.id = Date.now().toString();
-        // Remove image URL from stored item as we don't generate it anymore
+        item.sourceUrl = groundingUrl; 
         articles.unshift(item);
         addLog("POST", `Опубликовано: ${item.title}`);
       } else {
@@ -227,5 +253,5 @@ app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
-  addLog("SYS", "Server v3.1 (China Text-Only Mode)");
+  addLog("SYS", "Server v4.0 (Global Radar Active)");
 });
