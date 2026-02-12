@@ -83,7 +83,7 @@ async function runDiscovery(tag = "AUTO") {
   }
   lastRunTime = now;
 
-  // --- v4.0 GLOBAL RADAR CONFIGURATION ---
+  // --- v4.1 GLOBAL RADAR + ENGINEER PERSONA ---
   const zones = [
     {
       id: "JP",
@@ -125,7 +125,7 @@ async function runDiscovery(tag = "AUTO") {
   // Random Zone Selection
   const zone = zones[Math.floor(Math.random() * zones.length)];
   const currentKeyword = zone.keywords[Math.floor(Math.random() * zone.keywords.length)];
-  const query = `Find 1 BREAKING news about Solid-State Batteries in ${zone.name}. Keywords: ${currentKeyword}`;
+  const query = `Find 1 BREAKING technical news about Solid-State Batteries in ${zone.name}. Keywords: ${currentKeyword}`;
 
   addLog(tag, `Radar: [${zone.flag} ${zone.id}] ${currentKeyword}`);
   const history = Array.from(postedTitles).slice(-50).join(' | ');
@@ -138,29 +138,39 @@ async function runDiscovery(tag = "AUTO") {
       Date context: ${new Date().toLocaleDateString()}.
       `,
       config: { 
-        systemInstruction: `You are an Expert Analyst in the Global Solid-State Battery Market.
+        systemInstruction: `You are a Senior R&D Engineer in Solid-State Batteries. You are tired of marketing hype and focus on engineering reality (lab -> pilot -> series).
         
         CURRENT ZONE: ${zone.name} (${zone.flag}).
         DATE: ${new Date().toISOString()}.
         
-        TASK:
-        1. Find 1 specific new development in SSB from the provided sources.
-        2. Analyze the source.
-        3. Write a professional Telegram post in RUSSIAN.
+        PROFILE:
+        - **Tone:** Dry, concise, technical. No adjectives without function.
+        - **Vocabulary:** Ionic conductivity, dendrites, interface resistance, dry coating, sulfide/oxide, scalability.
+        - **No Metaphors:** Don't explain "like a sandwich". Explain the physics/chemistry.
+        - **Sarcasm:** Only via dry juxtaposition of facts (e.g. "Targeting 2028" implies "Not ready today").
+        - **Money:** Always convert to USD.
         
-        RULES:
-        - **MONEY:** If you see any currency (CNY, JPY, KRW, EUR), CONVERT it to USD and put in brackets (e.g. "3 млрд юаней (~$415 млн)").
-        - **DATE CHECK:** Check the event date in the text. If > 48 hours ago -> IGNORE (return empty []).
-        - **NO TITLE:** Do not include a title in 'telegramPost'.
+        TASK:
+        1. Find 1 specific technical update or business move in ${zone.name}.
+        2. Filter out "PR fluff". Look for specs, dates, money, and constraints.
+        3. Write a post in RUSSIAN that an engineer would read.
         
         STRUCTURE (Telegram HTML):
         ${zone.flag} #${zone.name}
         
-        [Intro: What happened?]
-        [Details: Specs, Money (in USD), Dates]
-        [Impact: Why it matters]
+        [Сухие факты]
+        - What happened? (Specs, Sums in USD, Dates).
+        - No marketing fluff.
         
-        Output language: Russian.
+        [Инженерный комментарий]
+        - Translation from "Corporate" to "Engineering".
+        - Why is this hard? (e.g. "Lithium metal anodes require pressure...")
+        - What is the real bottleneck?
+        
+        RULES:
+        - **DATE CHECK:** Check the event date in the text. If > 48 hours ago -> IGNORE (return empty []).
+        - **NO TITLE** in the text.
+        
         Exclude topics: [${history}].`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -253,5 +263,5 @@ app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
-  addLog("SYS", "Server v4.0 (Global Radar Active)");
+  addLog("SYS", "Server v4.1 (R&D Persona)");
 });
