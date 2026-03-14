@@ -11,6 +11,8 @@
  * - TELEGRAM_CHAT_ID_BAT (Channel for Batteries)
  * - TELEGRAM_TOKEN_GAM (Bot for Gamification)
  * - TELEGRAM_CHAT_ID_GAM (Channel for Gamification)
+ * - GITHUB_TOKEN (Personal Access Token with gist scope)
+ * - GIST_ID (ID of an existing Gist to store history)
  */
 
 const express = require('express');
@@ -21,7 +23,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- V6.3 CONFIGURATION (INJECTED FROM CONTROL ROOM) ---
+// --- V6.4 CONFIGURATION (INJECTED FROM CONTROL ROOM) ---
+// Includes Full Source Lists (50+ domains per topic)
 const CONFIG = {
   topics: [
   {
@@ -38,9 +41,11 @@ const CONFIG = {
       "All-solid-state battery mass production",
       "Toyota Solid State",
       "QuantumScape",
-      "Solid Power"
+      "Solid Power",
+      "LFP cathode evolution",
+      "Silicon anode"
     ],
-    "whitelist": "site:global.toyota OR site:samsungsdi.com OR site:catl.com OR site:quantumscape.com OR site:solidpowerbattery.com OR site:nature.com OR site:sciencedirect.com OR site:electrek.co OR site:pushevs.com OR site:asia.nikkei.com OR site:businesswire.com OR site:bloomberg.com/energy OR site:reuters.com/business/energy",
+    "whitelist": "site:global.toyota OR site:samsungsdi.com OR site:catl.com OR site:quantumscape.com OR site:solidpowerbattery.com OR site:nature.com OR site:sciencedirect.com OR site:electrek.co OR site:pushevs.com OR site:asia.nikkei.com OR site:businesswire.com OR site:bloomberg.com/energy OR site:reuters.com/business/energy OR site:joule.cell.com OR site:pubs.acs.org OR site:onlinelibrary.wiley.com OR site:electrochem.org OR site:insideevs.com OR site:battery-news.com OR site:mining.com OR site:prologium.com OR site:ses.ai OR site:factorialenergy.com OR site:gotion.com.cn OR site:ganfenglithium.com OR site:welion.com.cn OR site:blue-solutions.com OR site:store-dot.com OR site:amprius.com OR site:sila.com OR site:group14.technology OR site:enovix.com OR site:sk-on.com OR site:lgensol.com OR site:panasonic.com/global/energy OR site:northvolt.com OR site:freyrbattery.com OR site:morrowbatteries.com OR site:verkor.com OR site:acc-emotion.com OR site:powerco.de OR site:calb-tech.com OR site:svolt.cn OR site:farasis.com OR site:sunwoda.com OR site:argonne.gov OR site:nrel.gov",
     "personaName": "R&D Engineer",
     "personaPrompt": "Ты — Ведущий R&D инженер по химическим источникам тока (Senior Battery Scientist).\nТОН: Сухой, критический, циничный. Ты веришь только цифрам, графикам и результатам тестов.\nТВОЯ ЦЕЛЬ: Отфильтровать 99% маркетингового шума (\"убийцы лития\") и найти 1% реального прогресса.\n\nФОКУС ВНИМАНИЯ:\n1. Удельная энергоемкость (Wh/kg) и объемная плотность (Wh/L).\n2. Стоимость производства ($/kWh).\n3. Данные о циклах зарядки/разрядки (Cycle life).\n4. Проблемы дендритов и интерфейса электролит-катод.\n\nИГНОРИРОВАТЬ: Общие фразы \"революционный прорыв\" без спецификаций.",
     "schedule": "*/20 * * * *"
@@ -60,9 +65,10 @@ const CONFIG = {
       "Игровые механики в ритейле",
       "Геймификация HR",
       "WeChat Mini Games marketing",
-      "Roblox brand activation"
+      "Roblox brand activation",
+      "Behavioral economics in app"
     ],
-    "whitelist": "site:oborot.ru OR site:retail.ru OR site:sostav.ru OR site:adindex.ru OR site:cossa.ru OR site:vc.ru OR site:spot.uz OR site:kts.tech OR site:retail-loyalty.org OR site:cyberleninka.ru OR site:chinanews.com.cn OR site:sohu.com OR site:36kr.com OR site:woshipm.com OR site:199it.com OR site:retailtechinnovationhub.com OR site:game.qq.com OR site:sccgmanagement.com OR site:foxdata.com OR site:gallup.com OR site:escharts.com OR site:nikopartners.com OR site:ff.garena.com OR site:techcrunch.com OR site:newzoo.com OR site:carry1st.com OR site:gbarena.com OR site:sensortower.com OR site:app2top.ru OR site:data.ai OR site:techinasia.com OR site:kakaocorp.com OR site:linecorp.com OR site:gamification-now.ru",
+    "whitelist": "site:oborot.ru OR site:retail.ru OR site:sostav.ru OR site:adindex.ru OR site:cossa.ru OR site:vc.ru OR site:spot.uz OR site:kts.tech OR site:retail-loyalty.org OR site:cyberleninka.ru OR site:chinanews.com.cn OR site:sohu.com OR site:36kr.com OR site:woshipm.com OR site:199it.com OR site:retailtechinnovationhub.com OR site:game.qq.com OR site:sccgmanagement.com OR site:foxdata.com OR site:gallup.com OR site:escharts.com OR site:nikopartners.com OR site:ff.garena.com OR site:techcrunch.com OR site:newzoo.com OR site:carry1st.com OR site:gbarena.com OR site:sensortower.com OR site:app2top.ru OR site:data.ai OR site:techinasia.com OR site:kakaocorp.com OR site:linecorp.com OR site:gamification-now.ru OR site:yukaichou.com OR site:gamification.co OR site:badgeville.com OR site:bunchball.com OR site:biworldwide.com OR site:salesforce.com OR site:hubspot.com OR site:marketo.com OR site:loyalty360.org OR site:thewisemarketer.com OR site:marketingweek.com OR site:drum.com OR site:adweek.com OR site:digiday.com OR site:econsultancy.com OR site:nielsen.com OR site:mckinsey.com OR site:hbr.org",
     "personaName": "Game Designer",
     "personaPrompt": "Ты — Ведущий стратег по геймификации и поведенческой экономике.\nТОН: Профессиональный, но энтузиазм умеренный. Ты опираешься на метрики: LTV, Retention, ARPU.\nТВОЯ ЦЕЛЬ: Находить прикладные кейсы внедрения игровых механик в реальный бизнес (Ритейл, Банки, HR, EdTech).\n\nГЕОГРАФИЯ: \n- Россия/СНГ (банки, маркетплейсы)\n- Китай (WeChat, Mini-apps - приоритет!)\n- США (Loyalty programs)\n- LATAM (Киберспорт)\n\nИЩИ: Конкретные цифры роста продаж, вовлеченности или удержания.",
     "schedule": "*/20 * * * *"
@@ -78,6 +84,52 @@ let articles = [];
 let logs = [];
 let postedTitles = new Set();
 let lastRunTime = 0;
+
+// --- GIST PERSISTENT STORAGE ---
+async function loadGist() {
+  if (!process.env.GITHUB_TOKEN || !process.env.GIST_ID) {
+    addLog("GIST", "GITHUB_TOKEN или GIST_ID не заданы. Работаем в памяти.");
+    return;
+  }
+  try {
+    const res = await fetch(`https://api.github.com/gists/${process.env.GIST_ID}`, {
+      headers: { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}` }
+    });
+    const data = await res.json();
+    if (data.files && data.files['history.json']) {
+      const history = JSON.parse(data.files['history.json'].content);
+      history.forEach(t => postedTitles.add(t));
+      addLog("GIST", `Загружено ${postedTitles.size} записей из Gist.`);
+    }
+  } catch (e) {
+    addLog("GIST_ERROR", "Ошибка загрузки Gist: " + e.message);
+  }
+}
+
+async function saveGist() {
+  if (!process.env.GITHUB_TOKEN || !process.env.GIST_ID) return;
+  try {
+    const content = JSON.stringify(Array.from(postedTitles));
+    await fetch(`https://api.github.com/gists/${process.env.GIST_ID}`, {
+      method: 'PATCH',
+      headers: { 
+        'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        files: {
+          'history.json': { content }
+        }
+      })
+    });
+    addLog("GIST", "История успешно сохранена в Gist.");
+  } catch (e) {
+    addLog("GIST_ERROR", "Ошибка сохранения Gist: " + e.message);
+  }
+}
+
+// Load history on startup
+loadGist();
 
 const addLog = (tag, msg) => {
   const log = `[${new Date().toLocaleTimeString('ru-RU')}] [${tag}] ${msg}`;
@@ -191,22 +243,12 @@ async function runDiscovery(tag = "AUTO") {
         
         TASK:
         1. Find 1 specific news item matching the persona interests.
-        2. Write a post in RUSSIAN.
-        
-        STRUCTURE (Telegram HTML):
-        #${topic.id} #News
-        
-        [Суть]
-        - What happened?
-        
-        [Мнение ${topic.personaName}]
-        - Analysis.
+        2. Write a post in RUSSIAN following the exact structure and formatting rules provided in your persona prompt.
         
         RULES:
         - Date Check: Max 48h old.
         - NO TITLE in text.
-        
-        Exclude: [${history}].`,
+        - EXCLUDE THESE TOPICS (Already posted): [${history}].`,
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
@@ -238,7 +280,14 @@ async function runDiscovery(tag = "AUTO") {
     if (postedTitles.has(item.title)) return;
 
     const linkHtml = `<a href="${groundingUrl}">🔗 Источник</a>`;
-    const message = `<b>${item.title}</b>\n\n${item.telegramPost}\n\n${linkHtml}`;
+    
+    // Sanitize output to prevent Telegram HTML parse errors
+    let safePost = item.telegramPost
+      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // Convert markdown bold
+      .replace(/###/g, '') // Remove markdown headers
+      .replace(/##/g, '');
+
+    const message = `<b>${item.title}</b>\n\n${safePost}\n\n${linkHtml}`;
     
     addLog(tag, `Пост [${topic.id}] -> ${topic.channelId}`);
     
@@ -246,6 +295,7 @@ async function runDiscovery(tag = "AUTO") {
     
     if (tgRes.ok) {
       postedTitles.add(item.title);
+      saveGist(); // Save to persistent storage
       articles.unshift({ 
         id: Date.now().toString(), 
         title: item.title, 
@@ -269,5 +319,5 @@ app.get('/api/status', (req, res) => res.json({ logs, online: true }));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
-  addLog("SYS", "Control Room v6.3 Connected");
+  addLog("SYS", "Control Room v6.4 Connected");
 });
