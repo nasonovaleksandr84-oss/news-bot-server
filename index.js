@@ -546,10 +546,12 @@ ${tgContext}
     if (!groundingUrl)             { addLog(tag, "Нет источника — пропуск."); return; }
     if (postedTitles.has(item.title)) { addLog(tag, "Дубль — пропуск.");      return; }
 
-    // Санитизация HTML для Telegram
+    // Санитизация HTML для Telegram (поддерживаются только: b, i, u, s, a, code, pre)
     let safePost = item.telegramPost
-      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-      .replace(/#{1,3}\s?/g, '');
+      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')   // markdown bold → <b>
+      .replace(/#{1,3}\s?/g, '')                    // убрать markdown заголовки
+      .replace(/<cite[^>]*>(.*?)<\/cite>/gi, '$1')  // <cite> → просто текст
+      .replace(/<(?!\/?(?:b|i|u|s|a|code|pre)(?:\s[^>]*)?>)[^>]+>/gi, ''); // убрать все остальные теги
 
     const message = `<b>${item.title}</b>\n\n${safePost}\n\n<a href="${groundingUrl}">🔗 Источник</a>`;
 
