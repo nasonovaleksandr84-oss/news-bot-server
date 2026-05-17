@@ -175,7 +175,13 @@ const GAME_PERSONA = `Ты — Ведущий стратег по геймифи
 - НЕ повторять механику из последних 2 постов (смотри историю)
 - НЕ писать "революционный", "уникальный", "инновационный" без цифр или доказательств
 
-ДЛИНА ПОСТА: 4–7 предложений. Один абзац или два коротких.`;
+ДЛИНА ПОСТА: 4–7 предложений. Один абзац или два коротких.
+
+ФОРМАТ ТЕКСТА: только чистый текст, без какой-либо разметки.
+- Никаких HTML-тегов (<b>, <cite>, <a> и т.д.)
+- Никакого markdown (**, *, #, __)
+- Никаких эмодзи
+- Просто текст, который будет читаться как абзац`;
 
 // ─────────────────────────────────────────────────────────
 // КОНФИГУРАЦИЯ
@@ -546,14 +552,27 @@ ${tgContext}
     if (!groundingUrl)             { addLog(tag, "Нет источника — пропуск."); return; }
     if (postedTitles.has(item.title)) { addLog(tag, "Дубль — пропуск.");      return; }
 
-    // Санитизация HTML для Telegram (поддерживаются только: b, i, u, s, a, code, pre)
+    // Зачищаем текст поста от любой разметки — Claude должен слать чистый текст,
+    // но на всякий случай убираем всё лишнее
     let safePost = item.telegramPost
-      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')   // markdown bold → <b>
-      .replace(/#{1,3}\s?/g, '')                    // убрать markdown заголовки
-      .replace(/<cite[^>]*>(.*?)<\/cite>/gi, '$1')  // <cite> → просто текст
-      .replace(/<(?!\/?(?:b|i|u|s|a|code|pre)(?:\s[^>]*)?>)[^>]+>/gi, ''); // убрать все остальные теги
+      .replace(/<[^>]+>/g, '')           // убрать все HTML теги
+      .replace(/\*\*(.*?)\*\*/g, '$1')  // убрать markdown bold
+      .replace(/\*(.*?)\*/g, '$1')       // убрать markdown italic
+      .replace(/#{1,3}\s?/g, '')          // убрать markdown заголовки
+      .replace(/_{2}(.*?)_{2}/g, '$1')    // убрать markdown underline
+      .trim();
 
-    const message = `<b>${item.title}</b>\n\n${safePost}\n\n<a href="${groundingUrl}">🔗 Источник</a>`;
+    // Эмодзи по типу поста
+    const typeEmoji = {
+      case:      '📊',
+      research:  '🔬',
+      news:      '📰',
+      theory:    '💡',
+      community: '💬'
+    }[item.type] || '📌';
+
+    // Собираем финальное сообщение с чистой структурой
+    const message = `${typeEmoji} <b>${item.title}</b>\n\n${safePost}\n\n<a href="${groundingUrl}">🔗 Источник</a>`;
 
     addLog(tag, `Отправка [${item.type}|${item.region}|${item.mechanic}|${item.industry}]`);
 
