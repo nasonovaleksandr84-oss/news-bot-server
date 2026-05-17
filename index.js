@@ -497,7 +497,7 @@ ${tgContext}
 ОБЛАСТЬ ПОИСКА: ${scope || "Весь интернет"}
 ИСКЛЮЧИТЬ (уже опубликовано): [${excludedTitles}]
 
-Ответ ТОЛЬКО валидным JSON-массивом — без markdown, без backticks, без пояснений:
+ВАЖНО: твой ответ должен начинаться с символа "[" и заканчиваться символом "]". Никакого текста до или после. Только JSON-массив:
 [{
   "title": "краткий заголовок",
   "telegramPost": "текст поста на русском",
@@ -524,7 +524,11 @@ ${tgContext}
 
     let items = [];
     try {
-      const cleaned = rawText.replace(/```json|```/g, '').trim();
+      // Strip markdown fences
+      let cleaned = rawText.replace(/```json|```/g, '').trim();
+      // If Claude added text before the JSON array, extract just the [...] part
+      const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+      if (arrayMatch) cleaned = arrayMatch[0];
       items = JSON.parse(cleaned);
     } catch {
       addLog(tag, `JSON parse error. Raw: ${rawText.slice(0, 200)}`);
