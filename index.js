@@ -22,6 +22,7 @@
 const express = require('express');
 const cors = require('cors');
 const Anthropic = require('@anthropic-ai/sdk');
+const cron = require('node-cron');
 
 const app = express();
 app.use(cors());
@@ -615,10 +616,23 @@ app.get('/api/status', (req, res) => res.json({
 }));
 
 // ─────────────────────────────────────────────────────────
+// CRON — автозапуск по расписанию из конфига
+// ─────────────────────────────────────────────────────────
+CONFIG.topics
+  .filter(t => t.active && t.schedule)
+  .forEach(topic => {
+    cron.schedule(topic.schedule, () => {
+      addLog("CRON", `Автозапуск [${topic.id}]`);
+      runDiscovery("CRON");
+    });
+    addLog("SYS", `Cron [${topic.id}]: ${topic.schedule}`);
+  });
+
+// ─────────────────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  addLog("SYS", "GAME Bot v2.0 Online");
+  addLog("SYS", "GAME Bot v2.0 Online — cron активен");
 });
