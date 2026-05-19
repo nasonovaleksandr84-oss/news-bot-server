@@ -513,7 +513,9 @@ ${historySummary}
 1. Через web search найди материал не старше 48 часов по теме геймификации, лояльности или поведенческой экономики в бизнесе.
 2. Посмотри на историю. Выбери материал, который заполняет пробел по типу/региону/механике/индустрии.
 3. Напиши пост строго по структуре выбранного типа из промпта.
-4. Если совсем ничего не нашёл — верни пустой массив [].
+4. В поле sourceCitation поставь дословную цитату из статьи (1-2 предложения на языке оригинала). Это доказательство что источник реальный.
+5. Если не можешь процитировать текст из источника — значит источника нет. Верни пустой массив [].
+6. Пост пиши на основе реального текста статьи, не придумывай цифры и факты которых нет в источнике.
 ${tgContext}
 
 ОБЛАСТЬ ПОИСКА: ${scope || "Весь интернет"}
@@ -524,6 +526,7 @@ ${tgContext}
   "title": "краткий заголовок",
   "telegramPost": "текст поста на русском, абзацы разделены \\n\\n",
   "sourceUrl": "прямая ссылка на источник",
+  "sourceCitation": "дословная цитата 1-2 предложения из источника на языке оригинала",
   "type": "case|research|news|theory|community",
   "region": "ru|us|asia|global",
   "mechanic": "points|badges|levels|challenges|leaderboard|narrative|other",
@@ -532,7 +535,7 @@ ${tgContext}
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
       system: systemPrompt,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
@@ -578,6 +581,10 @@ ${tgContext}
     const groundingUrl = realUrl || item.sourceUrl;
 
     if (!groundingUrl)             { addLog(tag, "Нет источника — пропуск."); return; }
+    if (!item.sourceCitation || item.sourceCitation.length < 20) {
+      addLog(tag, "Нет цитаты из источника — возможная галлюцинация, пропуск.");
+      return;
+    }
     if (postedTitles.has(item.title)) { addLog(tag, "Дубль — пропуск.");      return; }
 
     // Зачищаем текст поста от любой разметки — Claude должен слать чистый текст,
