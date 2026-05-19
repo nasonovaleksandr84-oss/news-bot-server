@@ -539,10 +539,7 @@ ${tgContext}
       max_tokens: 1000,
       system: systemPrompt,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [
-        { role: 'user', content: userPrompt },
-        { role: 'assistant', content: '[' }
-      ]
+      messages: [{ role: 'user', content: userPrompt }]
     });
 
     const rawText = response.content
@@ -552,16 +549,13 @@ ${tgContext}
 
     let items = [];
     try {
-      // Restore prefill '[' that Anthropic strips from response
-      let cleaned = '[' + rawText;
-      // Strip markdown fences
-      cleaned = cleaned.replace(/```json|```/g, '').trim();
-      // Try to extract array first
+      let cleaned = rawText.replace(/```json|```/g, '').trim();
+      // Пробуем извлечь массив [...] 
       const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
       if (arrayMatch) {
         items = JSON.parse(arrayMatch[0]);
       } else {
-        // Maybe Claude returned a single object — wrap it
+        // Если вернул одиночный объект {...} — оборачиваем в массив
         const objMatch = cleaned.match(/\{[\s\S]*\}/);
         if (objMatch) items = [JSON.parse(objMatch[0])];
       }
