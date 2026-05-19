@@ -531,12 +531,19 @@ ${tgContext}
 
     let items = [];
     try {
+      // Restore prefill '[' that Anthropic strips from response
+      let cleaned = '[' + rawText;
       // Strip markdown fences
-      let cleaned = rawText.replace(/```json|```/g, '').trim();
-      // If Claude added text before the JSON array, extract just the [...] part
+      cleaned = cleaned.replace(/```json|```/g, '').trim();
+      // Try to extract array first
       const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-      if (arrayMatch) cleaned = arrayMatch[0];
-      items = JSON.parse(cleaned);
+      if (arrayMatch) {
+        items = JSON.parse(arrayMatch[0]);
+      } else {
+        // Maybe Claude returned a single object — wrap it
+        const objMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (objMatch) items = [JSON.parse(objMatch[0])];
+      }
     } catch {
       addLog(tag, `JSON parse error. Raw: ${rawText.slice(0, 200)}`);
       return;
