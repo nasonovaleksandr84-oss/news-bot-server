@@ -225,7 +225,7 @@ const CONFIG = {
       ],
       personaName: "Game Strategist",
       personaPrompt: GAME_PERSONA,
-      schedule: "*/20 * * * *"
+      schedule: "0 * * * *"
     }
   ]
 };
@@ -485,19 +485,16 @@ ${tgData.map(d => `[@${d.channel}]\n${d.posts.join('\n---\n')}`).join('\n\n')}
   const systemPrompt = `${topic.personaPrompt}
 
 ТЕКУЩАЯ ДАТА: ${new Date().toISOString()}
-ВРЕМЕННОЕ ОКНО: Материал не старше 72 часов.`;
+ВРЕМЕННОЕ ОКНО ПОИСКА: Только материал опубликованный за последние 24 часа. Если свежего материала нет — верни пустой массив []. Не публикуй ничего старше 24 часов.`;
 
   const userPrompt = `ИСТОРИЯ ПОСЛЕДНИХ ПОСТОВ (НЕ ПОВТОРЯТЬ):
 ${historySummary}
 
 ЗАДАЧА:
-1. Посмотри на историю. Определи, чего давно не было по каждому параметру:
-   - тип: case / research / news / theory / community
-   - регион: ru / us / asia / global
-   - механика: points / badges / levels / challenges / leaderboard / narrative
-   - индустрия: retail / fintech / hr / edtech / health
-2. Найди контент, который заполняет наибольший пробел.
+1. Через web search найди свежий материал опубликованный СЕГОДНЯ или ВЧЕРА (не старше 24 часов). Обязательно проверяй дату публикации — она должна быть явно указана и укладываться в 24 часа.
+2. Посмотри на историю. Выбери материал, который заполняет пробел по типу/региону/механике/индустрии.
 3. Напиши пост строго по структуре выбранного типа из промпта.
+4. Если не нашёл ничего свежего за 24 часа — верни пустой массив []. Лучше пропустить прогон, чем опубликовать устаревший материал.
 ${tgContext}
 
 ОБЛАСТЬ ПОИСКА: ${scope || "Весь интернет"}
@@ -516,7 +513,7 @@ ${tgContext}
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1000,
       system: systemPrompt,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
