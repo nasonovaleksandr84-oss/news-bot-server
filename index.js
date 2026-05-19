@@ -430,9 +430,27 @@ function buildHistorySummary(limit = 15) {
 // URL — извлечение из ответа Claude
 // ─────────────────────────────────────────────────────────
 function extractUrl(content) {
+  // Приоритет 1: URL из реальных результатов web search (tool_result блоки)
+  for (const block of content) {
+    if (block.type === 'tool_result' && block.content) {
+      for (const inner of block.content) {
+        if (inner.type === 'text') {
+          const m = inner.text.match(/https?:\/\/[^\s"'<>)\]"]+/);
+          if (m) return m[0];
+        }
+      }
+    }
+  }
+  // Приоритет 2: URL из tool_use input (поисковый запрос может содержать URL)
+  for (const block of content) {
+    if (block.type === 'tool_use' && block.name === 'web_search') {
+      // Не URL запроса, пропускаем
+    }
+  }
+  // Приоритет 3: URL из текстовых блоков Claude (менее надёжно)
   for (const block of content) {
     if (block.type === 'text') {
-      const m = block.text.match(/https?:\/\/[^\s"'<>)\]]+/);
+      const m = block.text.match(/https?:\/\/[^\s"'<>)\]"]+/);
       if (m) return m[0];
     }
   }
@@ -555,7 +573,9 @@ ${tgContext}
     }
 
     const item = items[0];
-    const groundingUrl = item.sourceUrl || extractUrl(response.content);
+    // Берём URL из реальных результатов поиска, а не из того что написал Claude
+    const realUrl = extractUrl(response.content);
+    const groundingUrl = realUrl || item.sourceUrl;
 
     if (!groundingUrl)             { addLog(tag, "Нет источника — пропуск."); return; }
     if (postedTitles.has(item.title)) { addLog(tag, "Дубль — пропуск.");      return; }
