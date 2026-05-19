@@ -583,15 +583,19 @@ ${tgContext}
     }
     if (postedTitles.has(item.title)) { addLog(tag, "Дубль — пропуск.");      return; }
 
-    // Зачищаем текст поста от любой разметки — Claude должен слать чистый текст,
-    // но на всякий случай убираем всё лишнее
-    let safePost = item.telegramPost
-      .replace(/<[^>]+>/g, '')           // убрать все HTML теги
-      .replace(/\*\*(.*?)\*\*/g, '$1')  // убрать markdown bold
-      .replace(/\*(.*?)\*/g, '$1')       // убрать markdown italic
-      .replace(/#{1,3}\s?/g, '')          // убрать markdown заголовки
-      .replace(/_{2}(.*?)_{2}/g, '$1')    // убрать markdown underline
+    // Зачищаем ВСЕ поля от разметки перед отправкой
+    const stripMarkup = (str = '') => str
+      .replace(/<cite[^>]*>(.*?)<\/cite>/gis, '$1') // <cite> → текст
+      .replace(/<[^>]+>/g, '')                        // все HTML теги
+      .replace(/\*\*(.*?)\*\*/g, '$1')               // markdown bold
+      .replace(/\*(.*?)\*/g, '$1')                    // markdown italic
+      .replace(/#{1,3}\s?/g, '')                       // markdown заголовки
+      .replace(/_{2}(.*?)_{2}/g, '$1')                 // markdown underline
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')       // markdown links
       .trim();
+
+    let safePost = stripMarkup(item.telegramPost);
+    const safeTitle = stripMarkup(item.title);
 
     // Эмодзи по типу поста
     const typeEmoji = {
@@ -603,7 +607,7 @@ ${tgContext}
     }[item.type] || '📌';
 
     // Собираем финальное сообщение с чистой структурой
-    const message = `${typeEmoji} <b>${item.title}</b>\n\n${safePost}\n\n<a href="${groundingUrl}">🔗 Источник</a>`;
+    const message = `${typeEmoji} <b>${safeTitle}</b>\n\n${safePost}\n\n<a href="${groundingUrl}">🔗 Источник</a>`;
 
     addLog(tag, `Отправка [${item.type}|${item.region}|${item.mechanic}|${item.industry}]`);
 
