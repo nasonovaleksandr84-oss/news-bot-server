@@ -575,7 +575,7 @@ ${tgContext}
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1000,
       // Prompt Caching — кэшируем системный промпт и инструменты
       // Экономия 50-90% на input токенах при повторных запросах
